@@ -1,0 +1,242 @@
+"""Errores de Mi Jarvis con mensajes claros en español."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+class JarvisError(Exception):
+    """Error controlado: el mensaje está pensado para mostrarse al usuario."""
+
+    default_message = "Ha ocurrido un error inesperado en Jarvis."
+
+    def __init__(self, message: str | None = None, *, detail: str | None = None) -> None:
+        self.user_message = message or self.default_message
+        # ``detail`` es para diagnóstico técnico; puede contener datos
+        # sensibles, así que no se muestra ni se registra por defecto.
+        self.detail = detail
+        super().__init__(self.user_message)
+
+
+class ConfigError(JarvisError):
+    default_message = "La configuración de Jarvis no es válida."
+
+
+class DocumentError(JarvisError):
+    default_message = "No se pudo leer el documento seleccionado."
+
+
+class DocumentNotFoundError(DocumentError):
+    default_message = "No se encontró el archivo indicado. Revisa la ruta e inténtalo de nuevo."
+
+
+class DocumentFormatError(DocumentError):
+    default_message = (
+        "El archivo no es un documento de Word (.docx) válido o está dañado. "
+        "Abre el archivo en Word, guárdalo de nuevo como .docx y vuelve a intentarlo."
+    )
+
+
+class DocumentProtectedError(DocumentError):
+    default_message = (
+        "El documento parece estar protegido, abierto en Word o sin permisos de "
+        "lectura. Ciérralo en Word o comprueba los permisos y vuelve a intentarlo."
+    )
+
+
+class DocumentEmptyError(DocumentError):
+    default_message = (
+        "El documento no contiene texto que Jarvis pueda leer. "
+        "Ten en cuenta que esta versión no lee imágenes, escaneos ni manuscritos."
+    )
+
+
+class ProviderError(JarvisError):
+    default_message = "El proveedor de inteligencia artificial no está disponible."
+
+
+class ProviderNotConfiguredError(ProviderError):
+    default_message = (
+        "Falta la clave de API necesaria. Revisa el archivo .env y vuelve a iniciar Jarvis."
+    )
+
+
+class ProviderAuthError(ProviderError):
+    default_message = (
+        "La clave de API fue rechazada. Comprueba que sea correcta y que siga activa."
+    )
+
+
+class ProviderRateLimitError(ProviderError):
+    default_message = (
+        "Se alcanzó el límite de uso del servicio (cuota agotada). "
+        "Espera a que la cuota se restablezca o revísala en el panel del proveedor. "
+        "Jarvis no activa planes de pago automáticamente."
+    )
+
+
+class ProviderPlanError(ProviderError):
+    default_message = (
+        "El plan actual del servicio no permite usar esta función. "
+        "En ElevenLabs, el plan gratuito no admite voces de biblioteca o "
+        "profesionales mediante la API: elige una voz predefinida (premade) "
+        "de tu cuenta en ELEVENLABS_VOICE_ID o revisa tu plan. "
+        "Jarvis no activa planes de pago automáticamente."
+    )
+
+
+class ProviderNetworkError(ProviderError):
+    default_message = (
+        "No se pudo conectar con el servicio externo. Comprueba tu conexión a "
+        "Internet e inténtalo de nuevo."
+    )
+
+
+class ProviderModelError(ProviderError):
+    default_message = (
+        "El modelo configurado no está disponible en tu cuenta. "
+        "Revisa la variable de entorno del modelo en el archivo .env."
+    )
+
+
+class ProviderResponseError(ProviderError):
+    default_message = (
+        "El servicio devolvió una respuesta vacía o inesperada. Inténtalo de nuevo."
+    )
+
+
+class AudioError(JarvisError):
+    default_message = "No se pudo utilizar el micrófono o el audio del sistema."
+
+
+class AudioNotAvailableError(AudioError):
+    default_message = (
+        "No se detectó un micrófono disponible. Puedes seguir usando Jarvis "
+        "escribiendo tus órdenes por teclado."
+    )
+
+
+class ConsentDeniedError(JarvisError):
+    default_message = (
+        "No se otorgó el consentimiento para enviar datos al servicio externo, "
+        "así que la operación se canceló. Puedes seguir usando las funciones locales."
+    )
+
+
+_NETWORK_HINTS = (
+    "timeout",
+    "timed out",
+    "connection",
+    "connecterror",
+    "network",
+    "dns",
+    "ssl",
+    "socket",
+    "httpx",
+    "requests",
+    "remotedisconnected",
+    "proxy",
+)
+
+_RATE_LIMIT_HINTS = (
+    "429",
+    "rate limit",
+    "rate_limit",
+    "quota",
+    "resource_exhausted",
+    "resource exhausted",
+    "too many requests",
+    "limit exceeded",
+)
+
+_AUTH_HINTS = (
+    "401",
+    "403",
+    "unauthorized",
+    "forbidden",
+    "invalid api key",
+    "invalid_api_key",
+    "authentication",
+    "permission",
+)
+
+_MODEL_HINTS = (
+    "404",
+    "model not found",
+    "not_found",
+    "not supported",
+    "unsupported model",
+    "does not exist",
+)
+
+_PLAN_HINTS = (
+    "paid_plan_required",
+    "payment_required",
+    "payment required",
+    "upgrade your subscription",
+    "free users cannot",
+    "plan_required",
+)
+
+
+def _status_code(exc: BaseException) -> int | None:
+    for attribute in ("status_code", "code", "http_status"):
+        value: Any = getattr(exc, attribute, None)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def classify_provider_error(exc: BaseException, provider: str) -> JarvisError:
+    """Traduce una excepción del SDK a un error comprensible para el usuario."""
+    if isinstance(exc, JarvisError):
+        return exc
+
+    status = _status_code(exc)
+    text = f"{type(exc).__name__} {exc}".lower()
+    module = type(exc).__module__ or ""
+
+    if status == 429 or any(hint in text for hint in _RATE_LIMIT_HINTS):
+        return ProviderRateLimitError(detail=f"{provider}: {type(exc).__name__}")
+
+    if status == 402 or any(hint in text for hint in _PLAN_HINTS):
+        return ProviderPlanError(detail=f"{provider}: {type(exc).__name__}")
+
+    if status in {401, 403} or any(hint in text for hint in _AUTH_HINTS):
+        return ProviderAuthError(
+            f"El servicio {provider} rechazó las credenciales. "
+            "Comprueba la clave de API en el archivo .env.",
+            detail=f"{provider}: {type(exc).__name__}",
+        )
+
+    if status == 404 or any(hint in text for hint in _MODEL_HINTS):
+        return ProviderModelError(
+            f"El modelo configurado no está disponible en {provider} con esta cuenta. "
+            "Revisa la variable del modelo en el archivo .env.",
+            detail=f"{provider}: {type(exc).__name__}",
+        )
+
+    if module.startswith(("httpx", "requests", "urllib3", "httpcore", "socket")) or any(
+        hint in text for hint in _NETWORK_HINTS
+    ):
+        return ProviderNetworkError(
+            f"No se pudo conectar con {provider}. Comprueba tu conexión a Internet.",
+            detail=f"{provider}: {type(exc).__name__}",
+        )
+
+    if status is not None and status >= 500:
+        return ProviderError(
+            f"{provider} informó de un problema interno (código {status}). "
+            "Inténtalo de nuevo en unos minutos.",
+            detail=f"{provider}: {type(exc).__name__}",
+        )
+
+    return ProviderError(
+        f"Ocurrió un error al comunicarse con {provider}. "
+        "Inténtalo de nuevo; si el problema continúa, revisa tu configuración.",
+        detail=f"{provider}: {type(exc).__name__}",
+    )

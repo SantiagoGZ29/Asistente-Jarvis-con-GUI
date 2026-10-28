@@ -1,0 +1,50 @@
+# Secretos y configuración privada
+.env
+.env.*
+!.env.example
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+.conda/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Herramientas
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Registros y temporales de Jarvis
+logs/
+*.log
+*.wav
+*.mp3
+*.webm
+
+# Editores y sistema
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Documentos personales que no deben versionarse
+docs_privados/
+*.docx
+!tests/fixtures/*.docx

@@ -1,0 +1,207 @@
+"""Pruebas de humo de la interfaz gráfica (sin pantalla real)."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+pytest.importorskip("PySide6")
+
+from PySide6.QtCore import QSettings  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
+
+from jarvis.config import Settings  # noqa: E402
+from jarvis.core.consent import (  # noqa: E402
+    ALL_REQUESTS,
+    ELEVENLABS_STT,
+    ELEVENLABS_TTS,
+    GEMINI_CHAT,
+    GEMINI_DOCUMENT,
+)
+from jarvis.core.controller import ChatMessage, DocumentInfo  # noqa: E402
+from jarvis.core.states import AssistantState, MicState  # noqa: E402
+from jarvis.ui.gui import (  # noqa: E402
+    MainWindow,
+    PrivacyDialog,
+    _apply_preferences,
+    _load_consent,
+    _save_consent,
+)
+
+ALL_FALSE = {key: False for key in ALL_REQUESTS}
+
+
+@pytest.fixture(scope="module")
+def qt_app():
+    app = QApplication.instance() or QApplication(["pytest-jarvis"])
+    yield app
+    app.processEvents()
+
+
+def pump(app: QApplication, rounds: int = 4) -> None:
+    for _ in range(rounds):
+        app.processEvents()
+
+
+def make_window(
+    qt_app: QApplication,
+    tmp_path: Path,
+    *,
+    settings: Settings | None = None,
+    grants: dict[str, bool] | None = None,
+) -> tuple[MainWindow, QSettings]:
+    store = QSettings(str(tmp_path / "gui.ini"), QSettings.Format.IniFormat)
+    window = MainWindow(
+        settings or Settings(env_file=None, speak_responses=False),
+        ALL_FALSE if grants is None else grants,
+        store=store,
+        device_probe=lambda: (),
+    )
+    return window, store
+
+
+def test_ventana_sin_claves_se_construye_y_cierra_limpio(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    window, _store = make_window(qt_app, tmp_path)
+    window.show()
+    assert window.controller is not None
+    assert window.controller.wait_for_idle(3.0)
+    pump(qt_app)
+
+    assert "Mi Jarvis" in window.windowTitle()
+    assert window.state_pill.text() == "PREPARADO"
+    assert window._chips["gemini"].text() == "GEMINI · SIN CLAVE"
+    assert window._chips["voice"].text() == "VOZ · SIN CLAVE"
+    assert window.controller.mic_state is MicState.UNAVAILABLE
+    assert window.document_card.name.text() == "Sin documento"
+    # El saludo inicial aparece aunque no haya claves ni voz.
+    assert len(window._bubbles) >= 1
+    assert window.empty_hint.isHidden()
+
+    window.close()
+    assert window.controller is None
+    assert window.bridge._closed is True
+
+
+def test_senales_actualizan_estado_conversacion_y_tarjetas(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    window, _store = make_window(qt_app, tmp_path)
+    window.show()
+
+    window.bridge.stateChanged.emit(
+        AssistantState.READY, AssistantState.LISTENING, "prueba"
+    )
+    assert window.state_pill.text() == "ESCUCHANDO"
+    assert window.orb._state is AssistantState.LISTENING
+
+    window.bridge.partial.emit("hola mun")
+    assert window.partial.text() == "hola mun"
+    window.bridge.partial.emit("")
+    assert window.partial.text() != "hola mun"
+
+    window.bridge.message.emit(ChatMessage("user", "hola"))
+    window.bridge.message.emit(
+        ChatMessage("jarvis", "respuesta breve", ("P1",))
+    )
+    assert len(window._bubbles) == 2
+    assert window.empty_hint.isHidden()
+
+    window.bridge.health.emit(
+        {
+            "gemini": "configurado",
+            "voice": "configurada",
+            "mic_state": "STREAMING",
+            "mic_running": True,
+            "microphone": "Micrófono de prueba",
+            "stt": "realtime",
+            "state": "LISTENING",
+        }
+    )
+    assert window._chips["gemini"].text() == "GEMINI · LISTO"
+    assert "ESCUCHANDO" in window._chips["mic"].text()
+    assert window._chips["stt"].text() == "STT · REALTIME"
+
+    window.bridge.choices.emit(("manual", "otro"))
+    assert len(window.choices._buttons) == 2
+    assert not window.choices.isHidden()
+
+    window.bridge.document.emit(
+        DocumentInfo(
+            path="C:/Downloads/manual.docx",
+            name="manual.docx",
+            title="Manual",
+            paragraphs=4,
+            tables=1,
+            sections=2,
+            characters=1234,
+            opened=True,
+        )
+    )
+    assert window.document_card.name.text() == "manual.docx"
+    assert "abierto en Word" in window.document_card.meta.text()
+
+    window.bridge.micTest.emit(
+        {"ok": False, "message": "No se detectó voz en la prueba."}
+    )
+    assert not window.notice.isHidden()
+    assert "No se detectó voz" in window.notice.text()
+
+    window.close()
+
+
+def test_cierre_es_idempotente_y_no_deja_controlador(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    window, _store = make_window(qt_app, tmp_path)
+    window.show()
+    window.close()
+    window.close()
+    assert window.controller is None
+
+
+def test_consentimiento_y_preferencias_se_guardan(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    store = QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat)
+    grants = {
+        ELEVENLABS_STT.key: True,
+        ELEVENLABS_TTS.key: False,
+        GEMINI_DOCUMENT.key: True,
+        GEMINI_CHAT.key: False,
+    }
+    _save_consent(store, grants)
+    assert _load_consent(store) == grants
+
+    store.setValue("audio/input_device", "MME|Micrófono|1")
+    store.setValue("behavior/auto_listen", False)
+    store.setValue("behavior/speak_responses", False)
+    settings = Settings(env_file=None)
+    applied = _apply_preferences(settings, store)
+
+    assert applied.input_device_key == "MME|Micrófono|1"
+    assert applied.auto_listen is False
+    assert applied.speak_responses is False
+
+    forced = _apply_preferences(
+        replace(settings, speak_responses=False), store, force_text=True
+    )
+    assert forced.speak_responses is False
+
+
+def test_privacidad_empieza_sin_marcar_y_modo_texto_deniega_todo(
+    qt_app: QApplication,
+) -> None:
+    dialog = PrivacyDialog(Settings(env_file=None))
+    assert dialog.choices() == ALL_FALSE
+    assert dialog.text_only is False
+    dialog._choose_text_only()
+    assert dialog.text_only is True
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert not any(dialog.choices().values())

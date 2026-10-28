@@ -1,0 +1,16 @@
+# Mi Jarvis - dependencias de la primera versión
+# Python 3.11 o superior
+
+google-genai>=2.33.0
+elevenlabs>=2.74.0
+python-docx>=1.2.0
+sounddevice>=0.5.0
+python-dotenv>=1.0.1
+
+# Interfaz grafica. Se instala solo Essentials (QtCore/QtGui/QtWidgets) en
+# lugar del meta-paquete PySide6, que arrastra WebEngine y PDF (~175 MB)
+# sin usarse en este proyecto.
+PySide6-Essentials>=6.7
+
+# Desarrollo / pruebas
+pytest>=8.3.0
