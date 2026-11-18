@@ -22,6 +22,24 @@ GEMINI_DOCUMENT_CONSENT = (
     "  - Jarvis no habilita facturación ni planes de pago automáticamente."
 )
 
+GEMINI_SPREADSHEET_CONSENT = (
+    "Para interpretar tus preguntas sobre el libro de Excel y redactar las "
+    "respuestas, Jarvis enviará a Google Gemini (servicio externo de IA) el "
+    "perfil del libro y los resultados ya calculados.\n"
+    "  - Qué se envía: nombres de hojas y columnas, tipos de datos, una muestra "
+    "mínima de filas y los resultados numéricos calculados por Jarvis. Nunca "
+    "se envía el archivo completo ni rutas locales.\n"
+    "  - Qué NO se envía: los cálculos se hacen en tu equipo; Gemini no recibe "
+    "el libro entero ni ejecuta fórmulas.\n"
+    "  - A quién: Google (API de Gemini, https://ai.google.dev).\n"
+    "  - Aviso de privacidad: en el nivel gratuito, Google puede usar el "
+    "contenido enviado para mejorar sus productos. Los libros con datos "
+    "confidenciales requieren una configuración de pago y tu propia revisión.\n"
+    "  - Puedes rechazarlo: Jarvis seguirá analizando el libro localmente y "
+    "respondiendo con sus propios cálculos, sin redactado externo.\n"
+    "  - Jarvis no habilita facturación ni planes de pago automáticamente."
+)
+
 GEMINI_CHAT_CONSENT = (
     "Para conversar contigo cuando no hay un documento abierto, Jarvis enviará "
     "tu mensaje y los últimos mensajes de la conversación a Google Gemini "
@@ -80,6 +98,13 @@ GEMINI_CHAT = ConsentRequest(
     description=GEMINI_CHAT_CONSENT,
 )
 
+GEMINI_SPREADSHEET = ConsentRequest(
+    key="gemini_spreadsheet",
+    provider="Google Gemini",
+    purpose="interpretar preguntas sobre el libro de Excel",
+    description=GEMINI_SPREADSHEET_CONSENT,
+)
+
 ELEVENLABS_STT = ConsentRequest(
     key="elevenlabs_stt",
     provider="ElevenLabs",
@@ -96,7 +121,13 @@ ELEVENLABS_TTS = ConsentRequest(
 
 ALL_REQUESTS: dict[str, ConsentRequest] = {
     request.key: request
-    for request in (GEMINI_DOCUMENT, GEMINI_CHAT, ELEVENLABS_STT, ELEVENLABS_TTS)
+    for request in (
+        GEMINI_DOCUMENT,
+        GEMINI_CHAT,
+        GEMINI_SPREADSHEET,
+        ELEVENLABS_STT,
+        ELEVENLABS_TTS,
+    )
 }
 
 

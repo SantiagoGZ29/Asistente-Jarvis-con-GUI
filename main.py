@@ -19,6 +19,7 @@ _DEPENDENCIES = (
     ("google-genai", "Google Gemini"),
     ("elevenlabs", "ElevenLabs"),
     ("python-docx", "Lectura de Word"),
+    ("openpyxl", "Lectura de Excel"),
     ("sounddevice", "Captura de audio"),
     ("python-dotenv", "Configuracion .env"),
     ("PySide6-Essentials", "Interfaz grafica"),
@@ -31,13 +32,14 @@ def build_parser() -> argparse.ArgumentParser:
         prog="jarvis",
         description=(
             "Mi Jarvis: asistente documental por voz y texto. "
-            "Lee un documento .docx y responde preguntas sobre su contenido."
+            "Lee documentos .docx y libros .xlsx/.xlsm, y responde preguntas "
+            "sobre su contenido con cálculos locales de solo lectura."
         ),
     )
     parser.add_argument(
         "--document",
         metavar="RUTA",
-        help="Abrir directamente un documento .docx al iniciar.",
+        help="Abrir directamente un documento .docx o un libro .xlsx/.xlsm al iniciar.",
     )
     parser.add_argument(
         "--console",

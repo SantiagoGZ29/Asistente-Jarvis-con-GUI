@@ -28,6 +28,9 @@ class ControllerBridge(QObject):
     error = Signal(str)
     health = Signal(object)
     document = Signal(object)
+    spreadsheet = Signal(object)
+    analysis = Signal(object)
+    analysisChoices = Signal(object)
     choices = Signal(object)
     pickRequested = Signal()
     exitRequested = Signal()
@@ -57,6 +60,9 @@ class ControllerBridge(QObject):
             on_error=self.error.emit,
             on_health=self.health.emit,
             on_document=self.document.emit,
+            on_spreadsheet=self.spreadsheet.emit,
+            on_analysis=self.analysis.emit,
+            on_analysis_choices=self.analysisChoices.emit,
             on_choices=self.choices.emit,
             on_pick_document=self.pickRequested.emit,
             on_exit=self.exitRequested.emit,

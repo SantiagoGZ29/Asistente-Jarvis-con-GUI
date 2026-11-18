@@ -13,11 +13,15 @@ from PySide6.QtGui import (
     QRadialGradient,
 )
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPushButton,
     QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -335,11 +339,12 @@ class DocumentCard(QFrame):
         self.name.setObjectName("DocName")
         self.name.setWordWrap(True)
         self.meta = QLabel(
-            "Abre un .docx de Descargas por voz o elígelo manualmente."
+            "Abre un .docx o un libro .xlsx/.xlsm de Descargas por voz o "
+            "elígelo manualmente."
         )
         self.meta.setObjectName("DocMeta")
         self.meta.setWordWrap(True)
-        self.button = QPushButton("Elegir .docx")
+        self.button = QPushButton("Elegir Word o Excel")
         self.button.setObjectName("Ghost")
         self.button.clicked.connect(self.pickRequested.emit)
         layout = QVBoxLayout(self)
@@ -355,7 +360,8 @@ class DocumentCard(QFrame):
         if info is None:
             self.name.setText("Sin documento")
             self.meta.setText(
-                "Abre un .docx de Descargas por voz o elígelo manualmente."
+                "Abre un .docx o un libro .xlsx/.xlsm de Descargas por voz o "
+                "elígelo manualmente."
             )
             return
         self.name.setText(info.name)
@@ -367,6 +373,196 @@ class DocumentCard(QFrame):
             f"{info.sections} encabezados · {characters} caracteres\n"
             f"{opened}"
         )
+
+
+class SpreadsheetCard(QFrame):
+    """Tarjeta del libro de Excel activo."""
+
+    pickRequested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("Panel")
+        title = QLabel("LIBRO ACTIVO")
+        title.setObjectName("SectionTitle")
+        self.name = QLabel("Sin libro de Excel")
+        self.name.setObjectName("DocName")
+        self.name.setWordWrap(True)
+        self.meta = QLabel(
+            "Abre un .xlsx o .xlsm de Descargas por voz o elígelo manualmente."
+        )
+        self.meta.setObjectName("DocMeta")
+        self.meta.setWordWrap(True)
+        self.button = QPushButton("Elegir .xlsx / .xlsm")
+        self.button.setObjectName("Ghost")
+        self.button.clicked.connect(self.pickRequested.emit)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(6)
+        layout.addWidget(title)
+        layout.addWidget(self.name)
+        layout.addWidget(self.meta)
+        layout.addSpacing(4)
+        layout.addWidget(self.button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.hide()
+
+    def set_spreadsheet(self, info) -> None:
+        if info is None:
+            self.name.setText("Sin libro de Excel")
+            self.meta.setText(
+                "Abre un .xlsx o .xlsm de Descargas por voz o elígelo "
+                "manualmente."
+            )
+            return
+        self.name.setText(info.name)
+        opened = "abierto en Excel" if info.opened else "cargado para consulta"
+        sheets = ", ".join(
+            f"{sheet.name} (oculta)" if sheet.hidden else sheet.name
+            for sheet in info.sheets[:8]
+        )
+        if len(info.sheets) > 8:
+            sheets += f" y {len(info.sheets) - 8} más"
+        numbers = f"{info.rows:,}".replace(",", ".")
+        lines = [
+            info.title,
+            f"{len(info.sheets)} hojas · hoja actual: "
+            f"{info.current_sheet or '—'}",
+            f"{sheets}" if sheets else "Sin hojas con datos legibles",
+            f"{numbers} registros · {info.columns} columnas · "
+            f"{info.formulas} fórmulas · {info.tables} tablas",
+            f"{opened} · análisis {info.status.lower()}",
+        ]
+        if info.truncated:
+            lines.append("Análisis parcial: el libro supera los límites.")
+        if info.warnings:
+            lines.append(info.warnings[0])
+        self.meta.setText("\n".join(lines))
+
+
+class AnalysisPanel(QFrame):
+    """Resultado estructurado del último análisis, con su tabla y avisos."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("PanelSoft")
+        self._title = QLabel("RESULTADO DEL ANÁLISIS")
+        self._title.setObjectName("SectionTitle")
+        self.heading = QLabel("")
+        self.heading.setObjectName("DocName")
+        self.heading.setWordWrap(True)
+
+        self._metrics = QHBoxLayout()
+        self._metrics.setContentsMargins(0, 0, 0, 0)
+        self._metrics.setSpacing(12)
+
+        self.table = QTableWidget(0, 0)
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.table.setAlternatingRowColors(True)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setWordWrap(False)
+        self.table.setMinimumHeight(80)
+
+        self.sources = QLabel("")
+        self.sources.setObjectName("Hint")
+        self.sources.setWordWrap(True)
+        self.alerts = QLabel("")
+        self.alerts.setWordWrap(True)
+        self.alerts.setStyleSheet(f"color: {theme.AMBER}; font-size: 10px;")
+        self.note = QLabel("")
+        self.note.setObjectName("Hint")
+        self.note.setWordWrap(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 12)
+        layout.setSpacing(6)
+        layout.addWidget(self._title)
+        layout.addWidget(self.heading)
+        layout.addLayout(self._metrics)
+        layout.addWidget(self.table)
+        layout.addWidget(self.alerts)
+        layout.addWidget(self.sources)
+        layout.addWidget(self.note)
+        self.hide()
+
+    def clear(self) -> None:
+        while self._metrics.count():
+            item = self._metrics.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self.table.clear()
+        self.table.setRowCount(0)
+        self.table.setColumnCount(0)
+        self.heading.setText("")
+        self.sources.setText("")
+        self.alerts.setText("")
+        self.note.setText("")
+        self.hide()
+
+    def set_analysis(self, info) -> None:
+        if info is None:
+            self.clear()
+            return
+        self.heading.setText(info.title or "Análisis")
+        while self._metrics.count():
+            item = self._metrics.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        for metric in info.metrics:
+            label = QLabel(f"{metric.label}: {metric.value}")
+            label.setObjectName("DocMeta")
+            self._metrics.addWidget(label)
+        self._metrics.addStretch(1)
+
+        columns = list(info.columns or ())
+        rows = [list(row) for row in (info.rows or ())]
+        if rows and not columns:
+            columns = [f"Columna {index + 1}" for index in range(
+                max(len(row) for row in rows)
+            )]
+        self.table.clear()
+        self.table.setColumnCount(len(columns))
+        self.table.setRowCount(len(rows) if columns else 0)
+        if columns:
+            self.table.setHorizontalHeaderLabels(columns)
+            for row_index, row in enumerate(rows):
+                for column_index in range(len(columns)):
+                    value = row[column_index] if column_index < len(row) else ""
+                    item = QTableWidgetItem(str(value))
+                    item.setToolTip(str(value))
+                    self.table.setItem(row_index, column_index, item)
+            header = self.table.horizontalHeader()
+            if len(columns) <= 6:
+                header.setSectionResizeMode(
+                    QHeaderView.ResizeMode.ResizeToContents
+                )
+            else:
+                header.setSectionResizeMode(
+                    QHeaderView.ResizeMode.Interactive
+                )
+            self.table.setVisible(True)
+            visible_rows = min(max(len(rows), 1), 7)
+            self.table.setFixedHeight(min(240, 34 + 25 * visible_rows))
+        else:
+            self.table.setVisible(False)
+
+        self.sources.setText(
+            "Fuente: " + " · ".join(info.sources) if info.sources else ""
+        )
+        self.sources.setVisible(bool(info.sources))
+        self.alerts.setText(
+            "Avisos: " + " · ".join(info.alerts) if info.alerts else ""
+        )
+        self.alerts.setVisible(bool(info.alerts))
+        self.note.setText(info.note or "")
+        self.note.setVisible(bool(info.note))
+        self.show()
 
 
 class ConversationBubble(QFrame):
@@ -443,7 +639,7 @@ class ChoicesPanel(QFrame):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(12, 10, 12, 10)
         self._layout.setSpacing(6)
-        self._title = QLabel("¿QUÉ DOCUMENTO ABRO?")
+        self._title = QLabel("¿QUÉ ABRO?")
         self._title.setObjectName("SectionTitle")
         self._layout.addWidget(self._title)
         self._buttons: list[QPushButton] = []

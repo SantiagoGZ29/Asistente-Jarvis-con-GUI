@@ -51,6 +51,40 @@ class DocumentEmptyError(DocumentError):
     )
 
 
+class SpreadsheetError(DocumentError):
+    default_message = "No se pudo leer el libro de Excel seleccionado."
+
+
+class SpreadsheetFormatError(SpreadsheetError):
+    default_message = (
+        "El archivo no es un libro de Excel compatible. Esta versión lee .xlsx "
+        "y .xlsm. Si tu archivo es .xls o .xlsb, ábrelo en Excel y guárdalo "
+        "como .xlsx."
+    )
+
+
+class SpreadsheetProtectedError(SpreadsheetError):
+    default_message = (
+        "El libro parece estar protegido, abierto en Excel o sin permisos de "
+        "lectura. Ciérralo en Excel o comprueba los permisos y vuelve a intentarlo."
+    )
+
+
+class SpreadsheetEmptyError(SpreadsheetError):
+    default_message = (
+        "El libro no contiene datos legibles en sus hojas visibles. "
+        "Comprueba que no esté vacío o que las hojas no estén ocultas."
+    )
+
+
+class SpreadsheetLimitError(SpreadsheetError):
+    default_message = (
+        "El libro supera el límite configurado para analizarlo con seguridad. "
+        "Puedes aumentar JARVIS_SPREADSHEET_MAX_FILE_MB o analizar una copia "
+        "más pequeña."
+    )
+
+
 class ProviderError(JarvisError):
     default_message = "El proveedor de inteligencia artificial no está disponible."
 

@@ -176,6 +176,57 @@ def test_usa_la_carpeta_conocida_inyectada(tmp_path: Path) -> None:
     assert result.decision == MATCH
 
 
+def test_encuentra_un_libro_excel_sin_extension_ni_tildes(
+    downloads: Path,
+) -> None:
+    objetivo = write_docx(downloads / "sub" / "Planificación_Tareas.xlsx")
+    library_ = DownloadsLibrary(
+        root=downloads, extensions=(".docx", ".xlsx", ".xlsm")
+    )
+
+    result = library_.search("planificacion tareas")
+
+    assert result.decision == MATCH
+    assert result.selected is not None
+    assert result.selected.path == objetivo
+    assert result.selected.kind == "spreadsheet"
+
+
+def test_ambiguedad_entre_word_y_excel_muestra_ambos(downloads: Path) -> None:
+    write_docx(downloads / "Seguimiento marzo.docx")
+    write_docx(downloads / "Seguimiento marzo.xlsx")
+    library_ = DownloadsLibrary(
+        root=downloads, extensions=(".docx", ".xlsx", ".xlsm")
+    )
+
+    result = library_.search("seguimiento marzo")
+
+    assert result.decision == AMBIGUOUS
+    assert len(result.candidates) == 2
+    assert {match.kind for match in result.candidates} == {
+        "document",
+        "spreadsheet",
+    }
+
+
+def test_abre_excel_y_rechaza_xls_antiguo(downloads: Path) -> None:
+    abiertos: list[Path] = []
+    library_ = DownloadsLibrary(
+        root=downloads,
+        extensions=(".docx", ".xlsx", ".xlsm"),
+        opener=abiertos.append,
+    )
+    libro = write_docx(downloads / "datos.xlsx")
+    antiguo = write_docx(downloads / "datos.xls")
+
+    assert library_.open_document(libro) == libro
+    assert abiertos == [libro]
+
+    with pytest.raises(DocumentError) as info:
+        library_.open_document(antiguo)
+    assert ".xlsx/.xlsm" in info.value.user_message
+
+
 def test_abre_con_aplicacion_inyectada(downloads: Path) -> None:
     objetivo = write_docx(downloads / "manual.docx")
     abiertos: list[Path] = []

@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from spreadsheet_helpers import write_book
+
 from jarvis.assistants.document_assistant import AssistantAnswer, Source
 from jarvis.audio.devices import InputDevice
 from jarvis.config import Settings
@@ -252,6 +254,8 @@ class Recorder:
         self.jarvis_levels: list[float] = []
         self.health: list[dict] = []
         self.documents: list[DocumentInfo | None] = []
+        self.spreadsheets: list[object] = []
+        self.analyses: list[object] = []
         self.choices: list[tuple[str, ...]] = []
         self.mic_tests: list[dict] = []
         self.picked = 0
@@ -269,6 +273,8 @@ class Recorder:
             on_jarvis_level=self.jarvis_levels.append,
             on_health=self.health.append,
             on_document=self.documents.append,
+            on_spreadsheet=self.spreadsheets.append,
+            on_analysis=self.analyses.append,
             on_choices=self.choices.append,
             on_pick_document=self._count_pick,
             on_exit=self._count_exit,
@@ -710,6 +716,80 @@ def test_documento_cargado_responde_preguntas(
 
     item.send("extrae las fechas")
     assert ("extract", "fechas") in item.assistant.calls
+
+
+def test_abre_excel_de_descargas_por_texto_y_responde(
+    harness, tmp_path: Path
+) -> None:
+    root = tmp_path / "Descargas"
+    libro = write_book(root / "Seguimiento tareas.xlsx")
+    abiertos: list[Path] = []
+    downloads = DownloadsLibrary(
+        root=root,
+        extensions=(".docx", ".xlsx", ".xlsm"),
+        opener=abiertos.append,
+    )
+    item = harness(downloads=downloads).start()
+
+    item.send("abre el excel de seguimiento tareas")
+
+    assert abiertos == [libro]
+    assert item.controller.workbook is not None
+    assert item.controller.workbook.name == "Seguimiento tareas.xlsx"
+    info = item.rec.spreadsheets[-1]
+    assert info is not None
+    assert info.name == "Seguimiento tareas.xlsx"
+    assert info.opened is True
+    assert info.rows == 7
+    assert item.rec.analyses
+    assert item.controller.document is None
+    assert "He abierto y cargado el libro" in item.rec.jarvis_texts[-1]
+
+    item.send("¿Cuántas tareas están vencidas?")
+    assert "3 registros vencidos" in item.rec.jarvis_texts[-1]
+    assert item.rec.analyses[-1].kind == "spreadsheet"
+
+    item.send("¿Y cuántas corresponden a Gestión?")
+    assert "2" in item.rec.jarvis_texts[-1]
+    assert "Gestión" in item.rec.jarvis_texts[-1]
+
+
+def test_cambiar_entre_excel_y_word_restaura_el_recurso(
+    harness, sample_docx: Path, tmp_path: Path
+) -> None:
+    libro = write_book(tmp_path / "Seguimiento tareas.xlsx")
+    item = harness().start()
+
+    item.controller.load_spreadsheet(libro)
+    assert item.controller.wait_for_idle(3.0)
+    assert item.controller.workbook is not None
+    assert item.rec.spreadsheets[-1].name == "Seguimiento tareas.xlsx"
+
+    item.controller.load_document(sample_docx)
+    assert item.controller.wait_for_idle(3.0)
+    assert item.controller.document is not None
+    assert item.controller.workbook is None
+    assert item.rec.spreadsheets[-1] is None
+    assert item.rec.documents[-1].name == "manual.docx"
+
+    item.send("¿Qué responsabilidades tiene el equipo?")
+    assert ("ask", "¿Qué responsabilidades tiene el equipo?") in item.assistant.calls
+
+    item.controller.load_spreadsheet(libro)
+    assert item.controller.wait_for_idle(3.0)
+    assert item.controller.workbook is not None
+    assert item.controller.document is None
+    assert item.rec.documents[-1] is None
+    assert item.rec.spreadsheets[-1].name == "Seguimiento tareas.xlsx"
+
+
+def test_sin_recurso_avisa_de_word_y_excel(harness) -> None:
+    item = harness().start()
+
+    item.send("resume el documento")
+
+    assert "No hay ningún documento cargado" in item.rec.jarvis_texts[-1]
+    assert "Excel" in item.rec.jarvis_texts[-1]
 
 
 def test_conversacion_sin_gemini_explica_el_fallo(harness) -> None:

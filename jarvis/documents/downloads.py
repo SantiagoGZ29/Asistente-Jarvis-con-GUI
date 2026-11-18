@@ -1,8 +1,9 @@
 """Búsqueda y apertura de documentos en la carpeta real de Descargas.
 
-Solo se consideran archivos ``.docx`` dentro de Descargas (o sus
-subcarpetas, con límites). Nunca se aceptan rutas inventadas por el modelo
-ni se ejecutan comandos: la apertura es una capacidad concreta y acotada.
+Por defecto solo se consideran archivos ``.docx`` (comportamiento histórico).
+El controlador puede ampliar la lista a ``.xlsx`` y ``.xlsm``. Nunca se aceptan
+rutas inventadas por el modelo ni se ejecutan comandos: la apertura es una
+capacidad concreta y acotada.
 """
 
 from __future__ import annotations
@@ -69,6 +70,17 @@ _STOPWORDS = frozenset(
         "archivos",
         "docx",
         "word",
+        "excel",
+        "xlsx",
+        "xlsm",
+        "libro",
+        "libros",
+        "hoja",
+        "hojas",
+        "planilla",
+        "calculos",
+        "cálculos",
+        "spreadsheet",
         "por",
         "favor",
         "descargas",
@@ -139,7 +151,9 @@ def _fallback_folders() -> list[Path]:
 
 def normalize_name(text: str) -> str:
     """Minúsculas, sin acentos, sin extensión y con separadores unificados."""
-    value = Path(text).stem if text.lower().endswith(".docx") else text
+    value = re.sub(
+        r"\.(docx|xlsx|xlsm|xls|xlsb|doc|pdf)$", "", (text or "").strip(), flags=re.IGNORECASE
+    )
     decomposed = unicodedata.normalize("NFKD", value or "")
     without_accents = "".join(
         char for char in decomposed if not unicodedata.combining(char)
@@ -192,6 +206,18 @@ class DocumentMatch:
     def display(self) -> str:
         return f"{self.path.stem} ({self.score:.2f})"
 
+    @property
+    def kind(self) -> str:
+        suffix = self.path.suffix.casefold()
+        if suffix in {".xlsx", ".xlsm", ".xls", ".xlsb"}:
+            return "spreadsheet"
+        return "document"
+
+
+def extensions_label(extensions: Iterable[str]) -> str:
+    values = tuple(dict.fromkeys(extension.casefold() for extension in extensions))
+    return "/".join(values) if values else ".docx"
+
 
 @dataclass(frozen=True)
 class SearchResult:
@@ -201,6 +227,7 @@ class SearchResult:
     decision: str = NOT_FOUND
     warning: str | None = None
     truncated: bool = False
+    extensions: tuple[str, ...] = (".docx",)
 
     @property
     def best(self) -> DocumentMatch | None:
@@ -225,12 +252,13 @@ class SearchResult:
         if self.decision == NOT_FOUND:
             return (
                 self.warning
-                or "No encontré ningún documento .docx con ese nombre en Descargas."
+                or f"No encontré ningún archivo {extensions_label(self.extensions)} "
+                "con ese nombre en Descargas."
             )
         if self.decision == AMBIGUOUS:
             options = ", ".join(match.path.stem for match in self.candidates)
-            return f"Encontré varios documentos parecidos: {options}. ¿Cuál quieres?"
-        return f"Documento encontrado: {self.best.path.name if self.best else ''}."
+            return f"Encontré varios archivos parecidos: {options}. ¿Cuál quieres?"
+        return f"Archivo encontrado: {self.best.path.name if self.best else ''}."
 
 
 class DownloadsLibrary:
@@ -240,6 +268,7 @@ class DownloadsLibrary:
         self,
         root: Path | str | None = None,
         *,
+        extensions: Iterable[str] = (".docx",),
         max_depth: int = 3,
         max_files: int = 2_000,
         min_score: float = 0.50,
@@ -249,6 +278,12 @@ class DownloadsLibrary:
         opener: Callable[[Path], None] | None = None,
     ) -> None:
         self._explicit_root = Path(root) if root is not None else None
+        self.extensions = tuple(
+            dict.fromkeys(
+                extension.casefold() if extension.startswith(".") else f".{extension.casefold()}"
+                for extension in extensions
+            )
+        ) or (".docx",)
         self.max_depth = max(0, int(max_depth))
         self.max_files = max(1, int(max_files))
         self.min_score = float(min_score)
@@ -318,6 +353,7 @@ class DownloadsLibrary:
                 root=None,
                 decision=NO_FOLDER,
                 warning=self.root_warning,
+                extensions=self.extensions,
             )
         if not clean_query:
             return SearchResult(
@@ -325,6 +361,7 @@ class DownloadsLibrary:
                 root=root,
                 decision=NOT_FOUND,
                 warning="Dime el nombre del documento que quieres abrir.",
+                extensions=self.extensions,
             )
 
         files, truncated = self._collect(root)
@@ -355,6 +392,7 @@ class DownloadsLibrary:
                 decision=NOT_FOUND,
                 warning=warning,
                 truncated=truncated,
+                extensions=self.extensions,
             )
 
         best = matches[0]
@@ -369,6 +407,7 @@ class DownloadsLibrary:
             decision=MATCH if clear else AMBIGUOUS,
             warning=warning,
             truncated=truncated,
+            extensions=self.extensions,
         )
 
     def _collect(self, root: Path) -> tuple[list[Path], bool]:
@@ -394,7 +433,7 @@ class DownloadsLibrary:
                             continue
                     except OSError:
                         continue
-                    if Path(name).suffix.casefold() != ".docx":
+                    if Path(name).suffix.casefold() not in self.extensions:
                         continue
                     if len(found) >= self.max_files:
                         return found, True
@@ -413,7 +452,7 @@ class DownloadsLibrary:
             base = root.resolve(strict=True)
         except (OSError, RuntimeError):
             return False
-        if candidate.suffix.casefold() != ".docx":
+        if candidate.suffix.casefold() not in self.extensions:
             return False
         if not candidate.is_file():
             return False
@@ -427,8 +466,9 @@ class DownloadsLibrary:
         """Abre el documento con su aplicación predeterminada de Windows."""
         candidate = Path(path)
         if not self.is_allowed(candidate):
+            label = extensions_label(self.extensions)
             raise DocumentError(
-                "Por seguridad, Jarvis solo abre archivos .docx que estén "
+                f"Por seguridad, Jarvis solo abre archivos {label} que estén "
                 "dentro de la carpeta de Descargas."
             )
         opener = self._opener or _system_opener

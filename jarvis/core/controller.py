@@ -57,12 +57,22 @@ from jarvis.documents.docx_loader import load_document
 from jarvis.documents.downloads import (
     AMBIGUOUS,
     MATCH,
+    NOT_FOUND,
     DownloadsLibrary,
     DocumentMatch,
+    SearchResult,
 )
 from jarvis.documents.models import DocumentModel
 from jarvis.providers.elevenlabs_provider import ElevenLabsProvider
 from jarvis.providers.gemini_provider import GeminiProvider
+from jarvis.spreadsheets.models import SpreadsheetInfo, WorkbookModel
+from jarvis.spreadsheets.query_engine import QueryEngine
+from jarvis.spreadsheets.spreadsheet_assistant import SpreadsheetAssistant
+from jarvis.spreadsheets.workbook_loader import (
+    WorkbookLoader,
+    describe_workbook,
+    is_spreadsheet_path,
+)
 from jarvis.voice.speech import SpeechCallbacks, SpeechOutput
 from jarvis.voice.stt import (
     BatchTranscriber,
@@ -167,6 +177,9 @@ class ControllerCallbacks:
     on_error: Callable[[str], None] = _noop
     on_health: Callable[[dict[str, Any]], None] = _noop
     on_document: Callable[[DocumentInfo | None], None] = _noop
+    on_spreadsheet: Callable[[SpreadsheetInfo | None], None] = _noop
+    on_analysis: Callable[[Any], None] = _noop
+    on_analysis_choices: Callable[[tuple[str, ...]], None] = _noop
     on_choices: Callable[[tuple[str, ...]], None] = _noop
     on_pick_document: Callable[[], None] = _noop
     on_exit: Callable[[], None] = _noop
@@ -226,6 +239,8 @@ class Controller:
         assistant_factory: Callable[[DocumentModel, tuple[Chunk, ...]], Any] | None = None,
         downloads: DownloadsLibrary | None = None,
         loader: Callable[[Path | str], DocumentModel] | None = None,
+        spreadsheet_loader: Callable[[Path | str], WorkbookModel] | None = None,
+        spreadsheet_assistant_factory: Callable[[WorkbookModel], Any] | None = None,
         devices_provider: Callable[[], tuple[InputDevice, ...]] | None = None,
         greet_on_start: bool = True,
         clock: Callable[[], float] = time.monotonic,
@@ -242,6 +257,8 @@ class Controller:
         self._assistant_factory = assistant_factory or self._default_assistant
         self._downloads = downloads
         self._loader = loader or load_document
+        self._spreadsheet_loader = spreadsheet_loader
+        self._spreadsheet_assistant_factory = spreadsheet_assistant_factory
         self._devices_provider = devices_provider
         self._greet_on_start = bool(greet_on_start)
         self._clock = clock
@@ -271,6 +288,8 @@ class Controller:
         self._document: DocumentModel | None = None
         self._chunks: tuple[Chunk, ...] = ()
         self._assistant: Any | None = None
+        self._workbook: WorkbookModel | None = None
+        self._spreadsheet_assistant: Any | None = None
         self._pending_choices: tuple[DocumentMatch, ...] = ()
 
         self._history: list[tuple[str, str]] = []
@@ -297,6 +316,18 @@ class Controller:
     def document_info(self) -> DocumentInfo | None:
         return (
             DocumentInfo.from_model(self._document) if self._document else None
+        )
+
+    @property
+    def workbook(self) -> WorkbookModel | None:
+        return self._workbook
+
+    @property
+    def spreadsheet_info(self) -> SpreadsheetInfo | None:
+        return (
+            SpreadsheetInfo.from_model(self._workbook)
+            if self._workbook is not None
+            else None
         )
 
     @property
@@ -372,7 +403,18 @@ class Controller:
 
     def load_document(self, path: str | Path) -> None:
         target = Path(path)
+        if is_spreadsheet_path(target):
+            self._submit(
+                lambda: self._load_spreadsheet_and_report(target, opened=False)
+            )
+            return
         self._submit(lambda: self._load_and_report(target, opened=False))
+
+    def load_spreadsheet(self, path: str | Path) -> None:
+        target = Path(path)
+        self._submit(
+            lambda: self._load_spreadsheet_and_report(target, opened=False)
+        )
 
     def choose_candidate(self, index: int) -> None:
         self._submit(lambda: self._open_candidate(index))
@@ -431,6 +473,9 @@ class Controller:
             "consent": sorted(self._consent.granted),
             "document": (
                 Path(self._document.path).name if self._document is not None else ""
+            ),
+            "workbook": (
+                self._workbook.name if self._workbook is not None else ""
             ),
         }
 
@@ -855,12 +900,14 @@ class Controller:
         if name == intents.SELECT_DOCUMENT:
             self._ask_for_picker()
             self._respond(
-                "Puedes elegir el documento en la ventana o decir «abre el "
-                "documento … de Descargas»."
+                "Puedes elegir el documento o libro en la ventana o decir «abre "
+                "el documento … de Descargas» o «abre el Excel de …»."
             )
             return
         if name == intents.OPEN_DOCUMENT:
-            self._open_from_downloads(intent.document_query, generation)
+            self._open_from_downloads(
+                intent.document_query, intent.file_kind, generation
+            )
             return
 
         if name in {
@@ -894,12 +941,15 @@ class Controller:
     def _downloads_library(self) -> DownloadsLibrary:
         if self._downloads is None:
             self._downloads = DownloadsLibrary(
+                extensions=(".docx", ".xlsx", ".xlsm"),
                 max_depth=self.settings.downloads_max_depth,
                 max_files=self.settings.downloads_max_files,
             )
         return self._downloads
 
-    def _open_from_downloads(self, query: str | None, generation: int) -> None:
+    def _open_from_downloads(
+        self, query: str | None, file_kind: str, generation: int
+    ) -> None:
         try:
             result = self._downloads_library().search(query)
         except Exception as exc:  # pragma: no cover - disco/permisos
@@ -912,6 +962,20 @@ class Controller:
 
         if not self._current(generation):
             return
+
+        if file_kind in {"spreadsheet", "document"}:
+            result = self._filter_result(result, file_kind)
+            if result.decision == NOT_FOUND and not result.matches:
+                suffix = ".xlsx o .xlsm" if file_kind == "spreadsheet" else ".docx"
+                self._pending_choices = ()
+                self._emit(self.callbacks.on_choices, ())
+                self._respond(
+                    result.warning
+                    or f"No encontré ningún archivo {suffix} con ese nombre en "
+                    "Descargas."
+                )
+                return
+
         if result.decision == MATCH and result.best is not None:
             self._pending_choices = ()
             self._emit(self.callbacks.on_choices, ())
@@ -922,10 +986,12 @@ class Controller:
             names = tuple(match.path.stem for match in result.candidates)
             self._emit(self.callbacks.on_choices, names)
             options = "\n".join(
-                f"  {index}. {name}" for index, name in enumerate(names, start=1)
+                f"  {index}. {match.path.name} "
+                f"({'Excel' if match.kind == 'spreadsheet' else 'Word'})"
+                for index, match in enumerate(result.candidates, start=1)
             )
             self._respond(
-                "Encontré varios documentos parecidos. ¿Cuál quieres abrir?\n"
+                "Encontré varios archivos parecidos. ¿Cuál quieres abrir?\n"
                 f"{options}\n"
                 "Puedes decir el número o elegirlo en la lista. No abriré "
                 "ninguno hasta que me lo indiques."
@@ -936,6 +1002,39 @@ class Controller:
         self._emit(self.callbacks.on_choices, ())
         self._respond(result.describe())
 
+    @staticmethod
+    def _filter_result(result: SearchResult, file_kind: str) -> SearchResult:
+        """Reduce las coincidencias al tipo pedido sin cambiar las reglas."""
+        matches = tuple(
+            match
+            for match in result.matches
+            if (match.kind == "spreadsheet") == (file_kind == "spreadsheet")
+        )
+        if not matches:
+            return SearchResult(
+                query=result.query,
+                root=result.root,
+                matches=(),
+                decision=NOT_FOUND,
+                warning=result.warning,
+                truncated=result.truncated,
+                extensions=result.extensions,
+            )
+        best = matches[0]
+        second = matches[1] if len(matches) > 1 else None
+        clear = best.score >= 0.86 and (
+            second is None or best.score - second.score >= 0.08
+        )
+        return SearchResult(
+            query=result.query,
+            root=result.root,
+            matches=matches,
+            decision=MATCH if clear else AMBIGUOUS,
+            warning=result.warning,
+            truncated=result.truncated,
+            extensions=result.extensions,
+        )
+
     def _open_match(self, match: DocumentMatch) -> None:
         opened = False
         warning = ""
@@ -944,6 +1043,9 @@ class Controller:
             opened = True
         except DocumentError as exc:
             warning = exc.user_message
+        if match.kind == "spreadsheet":
+            self._open_spreadsheet_match(match, opened=opened, warning=warning)
+            return
         info = self._load_and_report(match.path, opened=opened, quiet=True)
         if info is None:
             return
@@ -955,6 +1057,26 @@ class Controller:
         else:
             self._respond(
                 f"He cargado «{info.name}» para consultarlo. {warning}"
+            )
+
+    def _open_spreadsheet_match(
+        self, match: DocumentMatch, *, opened: bool, warning: str
+    ) -> None:
+        info = self._load_spreadsheet_and_report(
+            match.path, opened=opened, quiet=True
+        )
+        if info is None:
+            return
+        if opened:
+            self._respond(
+                f"He abierto y cargado el libro «{info.name}». "
+                f"Tiene {len(info.sheets)} hojas"
+                + (f" y {info.formulas} fórmulas" if info.formulas else "")
+                + ". Ya puedo analizarlo: pregunta por datos, hojas o fórmulas."
+            )
+        else:
+            self._respond(
+                f"He cargado el libro «{info.name}» para consultarlo. {warning}"
             )
 
     def _open_candidate(self, index: int) -> None:
@@ -1023,6 +1145,7 @@ class Controller:
         self._document = document
         self._chunks = chunks
         self._assistant = None
+        self._clear_spreadsheet()
         info = DocumentInfo.from_model(document, opened=opened)
         self._emit(self.callbacks.on_document, info)
         logger.info(
@@ -1038,6 +1161,108 @@ class Controller:
             )
         return info
 
+    # ------------------------------------------------------------------
+    # Libros de Excel
+    # ------------------------------------------------------------------
+    def _spreadsheet_limits(self) -> Any:
+        from jarvis.spreadsheets.workbook_loader import LoadLimits
+
+        return LoadLimits(
+            max_file_mb=self.settings.spreadsheet_max_file_mb,
+            max_rows=self.settings.spreadsheet_max_rows,
+            max_columns=self.settings.spreadsheet_max_columns,
+            max_cells=self.settings.spreadsheet_max_cells,
+            header_scan_rows=self.settings.spreadsheet_header_scan_rows,
+        )
+
+    def _load_spreadsheet_and_report(
+        self,
+        path: Path,
+        *,
+        opened: bool = False,
+        quiet: bool = False,
+    ) -> SpreadsheetInfo | None:
+        loader = self._spreadsheet_loader
+        try:
+            if loader is not None:
+                workbook = loader(path)
+            else:
+                workbook = WorkbookLoader(self._spreadsheet_limits()).load(path)
+        except JarvisError as exc:
+            self._fail_message(exc.user_message)
+            return None
+        except Exception as exc:
+            logger.warning(
+                "No se pudo leer el libro: %s", type(exc).__name__
+            )
+            self._fail_message(
+                "No se pudo leer ese libro. Comprueba que sea un .xlsx o "
+                ".xlsm válido y que no esté abierto en Excel."
+            )
+            return None
+
+        # Solo un recurso está activo: el libro reemplaza al documento Word.
+        if self._document is not None:
+            self._document = None
+            self._chunks = ()
+            self._assistant = None
+            self._emit(self.callbacks.on_document, None)
+        self._workbook = workbook
+        self._spreadsheet_assistant = None
+        info = SpreadsheetInfo.from_model(workbook, status="LISTO", opened=opened)
+        self._emit(self.callbacks.on_spreadsheet, info)
+        try:
+            assistant = self._ensure_spreadsheet_assistant()
+            self._emit(self.callbacks.on_analysis, assistant.analysis_info())
+        except Exception:  # pragma: no cover - perfilado defensivo
+            logger.warning("No se pudo preparar el panel del libro")
+        logger.info(
+            "Libro activo: %s (%d hojas, %d registros, %d fórmulas)",
+            info.name,
+            len(info.sheets),
+            info.rows,
+            info.formulas,
+        )
+        if not quiet:
+            self._respond(describe_workbook(workbook))
+        return info
+
+    def _clear_spreadsheet(self) -> None:
+        if self._workbook is None and self._spreadsheet_assistant is None:
+            return
+        self._workbook = None
+        self._spreadsheet_assistant = None
+        self._emit(self.callbacks.on_spreadsheet, None)
+
+    def _default_spreadsheet_assistant(self, workbook: WorkbookModel) -> Any:
+        provider = self._provider
+        if provider is None and self.settings.gemini_configured:
+            try:
+                provider = self._ensure_provider()
+            except Exception:  # pragma: no cover - configuración incompleta
+                provider = None
+        return SpreadsheetAssistant(
+            provider=provider,
+            workbook=workbook,
+            consent=self._consent,
+            engine=QueryEngine(max_rows=self.settings.spreadsheet_max_query_rows),
+            max_context_chars=self.settings.spreadsheet_max_context_chars,
+            timeout_s=self.settings.spreadsheet_timeout_s,
+        )
+
+    def _ensure_spreadsheet_assistant(self) -> Any:
+        if self._spreadsheet_assistant is None:
+            if self._workbook is None:
+                raise DocumentError("No hay ningún libro de Excel cargado.")
+            factory = self._spreadsheet_assistant_factory
+            if factory is not None:
+                self._spreadsheet_assistant = factory(self._workbook)
+            else:
+                self._spreadsheet_assistant = self._default_spreadsheet_assistant(
+                    self._workbook
+                )
+        return self._spreadsheet_assistant
+
     def _ask_for_picker(self) -> None:
         self._emit(self.callbacks.on_pick_document)
 
@@ -1046,13 +1271,29 @@ class Controller:
     # ------------------------------------------------------------------
     def _answer_question(self, intent: intents.Intent, generation: int) -> None:
         name = intent.name
+        if self._workbook is not None:
+            assistant = self._ensure_spreadsheet_assistant()
+            answer = assistant.ask(intent.text)
+            if not self._current(generation):
+                return
+            try:
+                self._emit(
+                    self.callbacks.on_analysis,
+                    assistant.analysis_info(sheet=getattr(answer, "sheet", "")),
+                )
+            except Exception:  # pragma: no cover - panel defensivo
+                pass
+            self._respond(answer)
+            return
+
         if self._document is None:
             if name == intents.QUESTION:
                 self._respond(self._chat_reply(intent.text, generation))
                 return
             self._respond(
-                "No hay ningún documento cargado. Pulsa «Elegir documento» o "
-                "dime «abre el documento … de Descargas»."
+                "No hay ningún documento cargado ni ningún libro de Excel "
+                "activo. Pulsa «Elegir documento» o dime «abre el documento … "
+                "de Descargas» o «abre el Excel de …»."
             )
             return
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from jarvis.core.consent import (
     ELEVENLABS_STT,
     GEMINI_DOCUMENT,
+    GEMINI_SPREADSHEET,
+    ALL_REQUESTS,
     ConsentManager,
 )
 
@@ -42,6 +44,19 @@ def test_rechazo_se_recuerda_y_no_reintenta() -> None:
     assert manager.request(GEMINI_DOCUMENT) is False
     assert manager.request(GEMINI_DOCUMENT) is False
     assert calls == ["gemini_document"]
+
+
+def test_excel_tiene_un_consentimiento_separado_y_explicito() -> None:
+    calls: list[str] = []
+    manager = ConsentManager(lambda request: calls.append(request.key) or True)
+
+    manager.request(GEMINI_DOCUMENT)
+    manager.request(GEMINI_SPREADSHEET)
+
+    assert calls == ["gemini_document", "gemini_spreadsheet"]
+    assert "gemini_spreadsheet" in ALL_REQUESTS
+    assert "resultados ya calculados" in GEMINI_SPREADSHEET.description
+    assert "Nunca" in GEMINI_SPREADSHEET.description
 
 
 def test_sin_consentimiento_explicito_todo_se_permite() -> None:

@@ -118,6 +118,28 @@ def test_ordenes_de_apertura_de_documentos(text: str, query: str | None) -> None
     assert intent.document_query == query
 
 
+@pytest.mark.parametrize(
+    ("text", "query", "kind"),
+    [
+        ("Abre el Excel de tareas de Descargas", "tareas", "spreadsheet"),
+        ("abre el libro seguimiento mensual", "seguimiento mensual", "spreadsheet"),
+        ("busca la planilla de gastos.xlsx", "gastos", "spreadsheet"),
+        ("abre el archivo informe.xlsx de descargas", "informe", "spreadsheet"),
+        ("abre el documento informe de Descargas", "informe", "document"),
+        ("abre el word del proyecto", "proyecto", "document"),
+        ("abre el archivo de descargas", None, ""),
+    ],
+)
+def test_reconoce_aperturas_de_excel_y_word(
+    text: str, query: str | None, kind: str
+) -> None:
+    intent = intents.parse(text)
+
+    assert intent.name == intents.OPEN_DOCUMENT
+    assert intent.document_query == query
+    assert intent.file_kind == kind
+
+
 def test_lee_el_manual_sigue_pidiendo_selector() -> None:
     intent = intents.parse("Jarvis, lee el manual que tengo abierto")
     assert intent.name == intents.SELECT_DOCUMENT

@@ -155,6 +155,16 @@ class Settings:
     downloads_max_depth: int = 3
     downloads_max_files: int = 2_000
 
+    # Análisis de libros de Excel (solo lectura)
+    spreadsheet_max_file_mb: float = 25.0
+    spreadsheet_max_rows: int = 10_000
+    spreadsheet_max_columns: int = 60
+    spreadsheet_max_cells: int = 300_000
+    spreadsheet_max_query_rows: int = 10_000
+    spreadsheet_max_context_chars: int = 6_000
+    spreadsheet_header_scan_rows: int = 12
+    spreadsheet_timeout_s: float = 20.0
+
     env_file: Path | None = field(default=DEFAULT_ENV_FILE)
     warnings: tuple[str, ...] = field(default=())
 
@@ -354,6 +364,62 @@ def load_settings(
             2_000,
             minimum=50,
             maximum=20_000,
+            warnings=warnings,
+        ),
+        spreadsheet_max_file_mb=_as_float(
+            "JARVIS_SPREADSHEET_MAX_FILE_MB",
+            25.0,
+            minimum=1.0,
+            maximum=200.0,
+            warnings=warnings,
+        ),
+        spreadsheet_max_rows=_as_int(
+            "JARVIS_SPREADSHEET_MAX_ROWS",
+            10_000,
+            minimum=100,
+            maximum=200_000,
+            warnings=warnings,
+        ),
+        spreadsheet_max_columns=_as_int(
+            "JARVIS_SPREADSHEET_MAX_COLUMNS",
+            60,
+            minimum=5,
+            maximum=500,
+            warnings=warnings,
+        ),
+        spreadsheet_max_cells=_as_int(
+            "JARVIS_SPREADSHEET_MAX_CELLS",
+            300_000,
+            minimum=1_000,
+            maximum=5_000_000,
+            warnings=warnings,
+        ),
+        spreadsheet_max_query_rows=_as_int(
+            "JARVIS_SPREADSHEET_MAX_QUERY_ROWS",
+            10_000,
+            minimum=100,
+            maximum=200_000,
+            warnings=warnings,
+        ),
+        spreadsheet_max_context_chars=_as_int(
+            "JARVIS_SPREADSHEET_MAX_CONTEXT_CHARS",
+            6_000,
+            minimum=1_000,
+            maximum=50_000,
+            warnings=warnings,
+        ),
+        spreadsheet_header_scan_rows=_as_int(
+            "JARVIS_SPREADSHEET_HEADER_SCAN_ROWS",
+            12,
+            minimum=1,
+            maximum=50,
+            warnings=warnings,
+        ),
+        spreadsheet_timeout_s=_as_float(
+            "JARVIS_SPREADSHEET_TIMEOUT_S",
+            20.0,
+            minimum=5.0,
+            maximum=120.0,
             warnings=warnings,
         ),
         log_level=log_level,

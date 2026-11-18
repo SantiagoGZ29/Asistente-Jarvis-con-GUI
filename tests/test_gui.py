@@ -22,9 +22,16 @@ from jarvis.core.consent import (  # noqa: E402
     ELEVENLABS_TTS,
     GEMINI_CHAT,
     GEMINI_DOCUMENT,
+    GEMINI_SPREADSHEET,
 )
 from jarvis.core.controller import ChatMessage, DocumentInfo  # noqa: E402
 from jarvis.core.states import AssistantState, MicState  # noqa: E402
+from jarvis.spreadsheets.models import (  # noqa: E402
+    AnalysisInfo,
+    Metric,
+    SheetInfo,
+    SpreadsheetInfo,
+)
 from jarvis.ui.gui import (  # noqa: E402
     MainWindow,
     PrivacyDialog,
@@ -166,6 +173,75 @@ def test_cierre_es_idempotente_y_no_deja_controlador(
     assert window.controller is None
 
 
+def test_tarjeta_de_excel_y_panel_de_analisis(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    window, _store = make_window(qt_app, tmp_path)
+    window.show()
+
+    info = SpreadsheetInfo(
+        path=str(tmp_path / "Seguimiento tareas.xlsx"),
+        name="Seguimiento tareas.xlsx",
+        title="Seguimiento de tareas",
+        status="LISTO",
+        sheets=(
+            SheetInfo(
+                name="Tareas",
+                hidden=False,
+                rows=7,
+                columns=13,
+                formulas=8,
+                tables=1,
+                purpose="tareas",
+            ),
+        ),
+        rows=7,
+        columns=13,
+        formulas=8,
+        tables=1,
+        current_sheet="Tareas",
+        opened=True,
+    )
+    window.bridge.spreadsheet.emit(info)
+    pump(qt_app)
+
+    assert window.spreadsheet_card.name.text() == "Seguimiento tareas.xlsx"
+    assert not window.spreadsheet_card.isHidden()
+    assert window.document_card.isHidden()
+    assert "hoja actual: Tareas" in window.spreadsheet_card.meta.text()
+    assert "8 fórmulas" in window.spreadsheet_card.meta.text()
+    assert "abierto en Excel" in window.spreadsheet_card.meta.text()
+
+    analysis = AnalysisInfo(
+        title="Tareas por área",
+        metrics=(Metric("Registros", "7"), Metric("Grupos", "3")),
+        columns=("Área", "Registros"),
+        rows=(("Gestión", "4"), ("Operaciones", "2")),
+        sources=("Fuente: hoja Tareas, rango A3:M11",),
+        alerts=("Hay una fila vacía.",),
+        note="Cálculo realizado en Python, de solo lectura.",
+        sheet="Tareas",
+    )
+    window.bridge.analysis.emit(analysis)
+    pump(qt_app)
+
+    assert not window.analysis.isHidden()
+    assert window.analysis.heading.text() == "Tareas por área"
+    assert window.analysis.table.rowCount() == 2
+    assert window.analysis.table.columnCount() == 2
+    assert window.analysis.table.item(0, 0).text() == "Gestión"
+    assert "Fuente: hoja Tareas" in window.analysis.sources.text()
+    assert "fila vacía" in window.analysis.alerts.text()
+
+    window.bridge.spreadsheet.emit(None)
+    pump(qt_app)
+    assert window.spreadsheet_card.isHidden()
+    assert not window.document_card.isHidden()
+    assert window.analysis.isHidden()
+
+    window.close()
+
+
 def test_consentimiento_y_preferencias_se_guardan(
     qt_app: QApplication, tmp_path: Path
 ) -> None:
@@ -175,6 +251,7 @@ def test_consentimiento_y_preferencias_se_guardan(
         ELEVENLABS_TTS.key: False,
         GEMINI_DOCUMENT.key: True,
         GEMINI_CHAT.key: False,
+        GEMINI_SPREADSHEET.key: True,
     }
     _save_consent(store, grants)
     assert _load_consent(store) == grants

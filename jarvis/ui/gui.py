@@ -44,6 +44,7 @@ from jarvis.core.consent import (
     ELEVENLABS_TTS,
     GEMINI_CHAT,
     GEMINI_DOCUMENT,
+    GEMINI_SPREADSHEET,
     ConsentManager,
     ConsentRequest,
 )
@@ -59,10 +60,12 @@ from jarvis.documents.downloads import windows_downloads_folder
 from jarvis.ui import theme
 from jarvis.ui.bridge import ControllerBridge
 from jarvis.ui.widgets import (
+    AnalysisPanel,
     ChoicesPanel,
     ConversationBubble,
     DocumentCard,
     OrbWidget,
+    SpreadsheetCard,
     VoicePanel,
 )
 
@@ -75,6 +78,10 @@ _CONSENT_ROWS: tuple[tuple[ConsentRequest, str], ...] = (
     (ELEVENLABS_STT, "Micrófono: transcribir mi voz con ElevenLabs"),
     (ELEVENLABS_TTS, "Voz: leer las respuestas con ElevenLabs"),
     (GEMINI_DOCUMENT, "Documentos: analizar fragmentos con Google Gemini"),
+    (
+        GEMINI_SPREADSHEET,
+        "Excel: interpretar preguntas y redactar respuestas con Google Gemini",
+    ),
     (GEMINI_CHAT, "Conversación: enviar mis mensajes a Google Gemini"),
 )
 
@@ -376,25 +383,33 @@ class HelpDialog(QDialog):
         text = QLabel(
             "Habla o escribe con naturalidad. Ejemplos:\n\n"
             "  •  «Abre el documento informe de Descargas»\n"
+            "  •  «Abre el Excel de tareas de Descargas»\n"
             "  •  «Resume el documento»\n"
             "  •  «¿Qué fechas y plazos aparecen?»\n"
             "  •  «Extrae las acciones pendientes»\n"
+            "  •  «¿Cuántas tareas están vencidas?»\n"
+            "  •  «Agrupa las tareas por área»\n"
+            "  •  «Explícame la fórmula de la columna Estado»\n"
+            "  •  «Revisa la calidad de los datos de la hoja Tareas»\n"
             "  •  «Pausa» / «Reanuda» / «Detente» / «Cancela»\n\n"
-            "Si hay varios documentos parecidos, Jarvis te preguntará cuál "
-            "abrir; nunca elige uno por su cuenta. Solo abre archivos .docx "
-            "que estén realmente en Descargas.\n\n"
+            "Si hay varios documentos o libros parecidos, Jarvis te preguntará "
+            "cuál abrir; nunca elige uno por su cuenta. Solo abre archivos "
+            ".docx, .xlsx o .xlsm que estén realmente en Descargas. Los libros "
+            "se leen en modo solo lectura: Jarvis no guarda, edita ni ejecuta "
+            "macros.\n\n"
             "ATAJOS\n\n"
             "  Ctrl+M   Pausar o reanudar la escucha\n"
             "  Ctrl+.   Detener la voz de Jarvis\n"
             "  Ctrl+T   Probar el micrófono\n"
-            "  Ctrl+O   Elegir un .docx manualmente\n"
+            "  Ctrl+O   Elegir un documento o libro manualmente\n"
             "  Ctrl+,   Abrir Ajustes\n"
             "  F1       Esta ayuda\n\n"
             "PRIVACIDAD\n\n"
             "El audio se envía a ElevenLabs solo cuando el micrófono está "
-            "activo. Los documentos y la conversación se envían a Gemini solo "
-            "si lo autorizas. Puedes retirar los permisos en Ajustes; el modo "
-            "texto y la apertura local de documentos siguen funcionando."
+            "activo. Los documentos, los libros y la conversación se envían a "
+            "Gemini solo si lo autorizas. Los cálculos de Excel se hacen en tu "
+            "equipo. Puedes retirar los permisos en Ajustes; el modo texto y "
+            "la apertura local de documentos siguen funcionando."
         )
         text.setWordWrap(True)
         text.setObjectName("Hint")
@@ -455,6 +470,7 @@ class MainWindow(QMainWindow):
         self._probing = False
         self._closing = False
         self._bubbles: list[ConversationBubble] = []
+        self._has_spreadsheet = False
         self._notice_timer = QTimer(self)
         self._notice_timer.setSingleShot(True)
         self._notice_timer.timeout.connect(self._clear_notice)
@@ -522,7 +538,9 @@ class MainWindow(QMainWindow):
         title_box.setSpacing(2)
         title = QLabel("MI JARVIS")
         title.setObjectName("AppTitle")
-        subtitle = QLabel("ASISTENTE PERSONAL · VOZ, DOCUMENTOS Y DESCARGAS")
+        subtitle = QLabel(
+            "ASISTENTE PERSONAL · VOZ, DOCUMENTOS, EXCEL Y DESCARGAS"
+        )
         subtitle.setObjectName("AppSubtitle")
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
@@ -660,6 +678,13 @@ class MainWindow(QMainWindow):
         self.choices.chosen.connect(self._choose_document)
         layout.addWidget(self.choices)
 
+        self.analysis = AnalysisPanel()
+        layout.addWidget(self.analysis)
+
+        self.spreadsheet_card = SpreadsheetCard()
+        self.spreadsheet_card.pickRequested.connect(self._pick_document)
+        layout.addWidget(self.spreadsheet_card)
+
         self.document_card = DocumentCard()
         self.document_card.pickRequested.connect(self._pick_document)
         layout.addWidget(self.document_card)
@@ -748,6 +773,9 @@ class MainWindow(QMainWindow):
         bridge.error.connect(self._on_error)
         bridge.health.connect(self._on_health)
         bridge.document.connect(self._on_document)
+        bridge.spreadsheet.connect(self._on_spreadsheet)
+        bridge.analysis.connect(self._on_analysis)
+        bridge.analysisChoices.connect(self._on_analysis_choices)
         bridge.choices.connect(self._on_choices)
         bridge.pickRequested.connect(self._pick_document)
         bridge.exitRequested.connect(self._request_close)
@@ -987,6 +1015,28 @@ class MainWindow(QMainWindow):
 
     def _on_document(self, info: DocumentInfo | None) -> None:
         self.document_card.set_document(info)
+        if info is not None:
+            self._has_spreadsheet = False
+            self.spreadsheet_card.hide()
+            self.document_card.show()
+        else:
+            self.document_card.setVisible(not self._has_spreadsheet)
+
+    def _on_spreadsheet(self, info) -> None:
+        self._has_spreadsheet = info is not None
+        self.spreadsheet_card.set_spreadsheet(info)
+        self.spreadsheet_card.setVisible(self._has_spreadsheet)
+        self.document_card.setVisible(not self._has_spreadsheet)
+        if info is not None:
+            self.choices.set_choices(())
+        if info is None:
+            self.analysis.set_analysis(None)
+
+    def _on_analysis(self, info) -> None:
+        self.analysis.set_analysis(info)
+
+    def _on_analysis_choices(self, options: Iterable[str]) -> None:
+        self.choices.set_choices(tuple(options or ()))
 
     def _on_choices(self, names: Iterable[str]) -> None:
         self.choices.set_choices(tuple(names or ()))
@@ -1063,9 +1113,10 @@ class MainWindow(QMainWindow):
         start = self._downloads_start()
         path, _filter = QFileDialog.getOpenFileName(
             self,
-            "Elegir documento de Word",
+            "Elegir documento o libro",
             str(start),
-            "Documentos de Word (*.docx)",
+            "Documentos compatibles (*.docx *.xlsx *.xlsm);;"
+            "Word (*.docx);;Excel (*.xlsx *.xlsm)",
         )
         if path:
             self._controller.load_document(path)

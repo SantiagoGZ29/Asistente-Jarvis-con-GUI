@@ -106,10 +106,22 @@ _GREETING_RE = re.compile(
 _OPEN_DOC_RE = re.compile(
     r"\b(abre|abrir|abreme|abrirme|busca|buscar|buscame|encuentra|encontrar|"
     r"localiza|localizar)\b[^?.!]*\b(documento|documentos|archivo|archivos|"
-    r"manual|docx|word)\b"
+    r"manual|docx|word|excel|libro|libros|xlsx|xlsm|planilla|hoja|hojas)\b"
     r"|\b(busca|buscar|buscame|encuentra|encontrar|localiza|localizar)\b"
     r"[^?.!]*\bdescargas\b"
 )
+
+_SPREADSHEET_WORDS = (
+    "excel",
+    "xlsx",
+    "xlsm",
+    "libro",
+    "planilla",
+    "hoja de calculo",
+    "hoja de cálculo",
+    "calculos",
+)
+_DOCUMENT_WORDS = ("docx", "word", "documento", "texto")
 _STOP_SPEECH_RE = re.compile(
     r"\b(detente|deten la voz|detener la voz|deten el audio|para el audio|"
     r"para de hablar|deja de hablar|callate|silencio|basta|stop)\b"
@@ -207,6 +219,7 @@ class Intent:
     topic: str | None = None
     detail: bool = False
     document_query: str | None = None
+    file_kind: str = ""
 
 
 def find_section_reference(normalized_text: str) -> str | None:
@@ -262,7 +275,7 @@ def _extract_topic(normalized_text: str) -> str | None:
 
 
 def _extract_document_query(normalized_text: str) -> str | None:
-    """Aísla el nombre del documento en una orden de apertura."""
+    """Aísla el nombre del documento o libro en una orden de apertura."""
     text = normalized_text
     text = re.sub(r"^(?:por favor[ ,]+)+", "", text)
     text = re.sub(
@@ -273,15 +286,25 @@ def _extract_document_query(normalized_text: str) -> str | None:
     )
     # "en/de Descargas" o "de la carpeta de Descargas" no forma parte del nombre.
     text = re.sub(
+        r"\b(?:que\s+)?(?:tengo|hay|esta|está|se\s+encuentra)\s+"
+        r"(?:de|en|dentro\s+de)\s+(?:la\s+)?(?:carpeta\s+de\s+)?descargas\b",
+        " ",
+        text,
+    )
+    text = re.sub(
         r"\b(?:de|en|dentro\s+de)\s+(?:la\s+)?(?:carpeta\s+de\s+)?descargas\b",
         " ",
         text,
     )
-    text = re.sub(r"^(?:el|la|los|las|un|una)\s+", "", text)
+    text = re.sub(r"^(?:el|la|los|las|un|una|mi|mis)\s+", "", text)
     text = re.sub(
-        r"^(?:documento|documentos|archivo|archivos|docx|word)(?:\s+|$)", "", text
+        r"^(?:documento|documentos|archivo|archivos|docx|word|excel|libro|"
+        r"libros|planilla|hoja|hojas|xlsx|xlsm)(?:\s+|$)",
+        "",
+        text,
     )
     text = re.sub(r"^(?:de|del)\s+", "", text)
+    text = re.sub(r"^(?:el|la|los|las|un|una|mi|mis)\s+", "", text)
     text = re.sub(r"^descargas\s+", "", text)
     text = re.sub(
         r"\b(?:que\s+se\s+llama|que\s+se\s+llamaba|llamado|llamada|"
@@ -289,6 +312,7 @@ def _extract_document_query(normalized_text: str) -> str | None:
         " ",
         text,
     )
+    text = re.sub(r"\.(docx|xlsx|xlsm|xls|xlsb)\b", "", text)
     text = re.sub(r"\s+y\s+(?:abrelo|abrela|abrir|abre|muestralo|muestrala)\b.*$", "", text)
     text = re.sub(
         r"\s+y\s+(?:resumelo|resumela|resume|explicamelo|explica|dime)\b.*$",
@@ -297,6 +321,22 @@ def _extract_document_query(normalized_text: str) -> str | None:
     )
     text = re.sub(r"\s+", " ", text).strip(" ,.;:?!")
     return text or None
+
+
+def detect_file_kind(normalized_text: str) -> str:
+    """Distingue una orden sobre Excel de una orden sobre Word."""
+    text = normalized_text
+    spreadsheet = any(word in text for word in _SPREADSHEET_WORDS)
+    document = any(word in text for word in _DOCUMENT_WORDS)
+    if spreadsheet and not document:
+        return "spreadsheet"
+    if document and not spreadsheet:
+        return "document"
+    if ".xls" in text:
+        return "spreadsheet"
+    if ".docx" in text:
+        return "document"
+    return ""
 
 
 def _is_short_command(normalized_text: str, max_words: int = 7) -> bool:
@@ -344,6 +384,7 @@ def parse(text: str) -> Intent:
             OPEN_DOCUMENT,
             text.strip(),
             document_query=_extract_document_query(normalized),
+            file_kind=detect_file_kind(normalized),
         )
 
     if _SELECT_RE.search(normalized):

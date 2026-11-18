@@ -67,6 +67,7 @@ class AssistantAnswer:
     sources: tuple[Source, ...] = field(default_factory=tuple)
     grounded: bool = True
     notice: str | None = None
+    options: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def has_sources(self) -> bool:

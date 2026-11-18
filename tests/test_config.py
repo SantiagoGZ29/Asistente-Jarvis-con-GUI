@@ -37,6 +37,14 @@ _ENV_VARIABLES = (
     "JARVIS_GREETING",
     "JARVIS_DOWNLOADS_MAX_DEPTH",
     "JARVIS_DOWNLOADS_MAX_FILES",
+    "JARVIS_SPREADSHEET_MAX_FILE_MB",
+    "JARVIS_SPREADSHEET_MAX_ROWS",
+    "JARVIS_SPREADSHEET_MAX_COLUMNS",
+    "JARVIS_SPREADSHEET_MAX_CELLS",
+    "JARVIS_SPREADSHEET_MAX_QUERY_ROWS",
+    "JARVIS_SPREADSHEET_MAX_CONTEXT_CHARS",
+    "JARVIS_SPREADSHEET_HEADER_SCAN_ROWS",
+    "JARVIS_SPREADSHEET_TIMEOUT_S",
 )
 
 
@@ -66,6 +74,39 @@ def test_valores_por_defecto(monkeypatch) -> None:
     assert settings.gemini_configured is False
     assert settings.elevenlabs_configured is False
     assert settings.elevenlabs_tts_configured is False
+
+
+    assert settings.spreadsheet_max_file_mb == 25.0
+    assert settings.spreadsheet_max_rows == 10_000
+    assert settings.spreadsheet_max_columns == 60
+    assert settings.spreadsheet_max_cells == 300_000
+    assert settings.spreadsheet_max_query_rows == 10_000
+    assert settings.spreadsheet_max_context_chars == 6_000
+    assert settings.spreadsheet_header_scan_rows == 12
+    assert settings.spreadsheet_timeout_s == 20.0
+
+
+def test_configuracion_de_excel(monkeypatch) -> None:
+    _clear_environment(monkeypatch)
+    monkeypatch.setenv("JARVIS_SPREADSHEET_MAX_FILE_MB", "12.5")
+    monkeypatch.setenv("JARVIS_SPREADSHEET_MAX_ROWS", "250")
+    monkeypatch.setenv("JARVIS_SPREADSHEET_MAX_COLUMNS", "20")
+    monkeypatch.setenv("JARVIS_SPREADSHEET_MAX_CELLS", "5000")
+    monkeypatch.setenv("JARVIS_SPREADSHEET_MAX_QUERY_ROWS", "500")
+    monkeypatch.setenv("JARVIS_SPREADSHEET_MAX_CONTEXT_CHARS", "2000")
+    monkeypatch.setenv("JARVIS_SPREADSHEET_HEADER_SCAN_ROWS", "6")
+    monkeypatch.setenv("JARVIS_SPREADSHEET_TIMEOUT_S", "9.5")
+
+    settings = load_settings(load_env=False)
+
+    assert settings.spreadsheet_max_file_mb == 12.5
+    assert settings.spreadsheet_max_rows == 250
+    assert settings.spreadsheet_max_columns == 20
+    assert settings.spreadsheet_max_cells == 5_000
+    assert settings.spreadsheet_max_query_rows == 500
+    assert settings.spreadsheet_max_context_chars == 2_000
+    assert settings.spreadsheet_header_scan_rows == 6
+    assert settings.spreadsheet_timeout_s == 9.5
 
 
 def test_variables_del_entorno(monkeypatch) -> None:
