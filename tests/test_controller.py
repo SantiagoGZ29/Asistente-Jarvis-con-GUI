@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from spreadsheet_helpers import write_book
+from spreadsheet_helpers import TODAY, write_book
 
 from jarvis.assistants.document_assistant import AssistantAnswer, Source
 from jarvis.audio.devices import InputDevice
@@ -30,6 +30,8 @@ from jarvis.documents.downloads import (
     DownloadsLibrary,
     SearchResult,
 )
+from jarvis.spreadsheets.query_engine import QueryEngine
+from jarvis.spreadsheets.spreadsheet_assistant import SpreadsheetAssistant
 
 
 def wait_until(predicate, timeout: float = 2.0) -> bool:
@@ -258,6 +260,7 @@ class Recorder:
         self.analyses: list[object] = []
         self.choices: list[tuple[str, ...]] = []
         self.mic_tests: list[dict] = []
+        self.google: list[object] = []
         self.picked = 0
         self.exits = 0
 
@@ -279,6 +282,7 @@ class Recorder:
             on_pick_document=self._count_pick,
             on_exit=self._count_exit,
             on_mic_test=self.mic_tests.append,
+            on_google=self.google.append,
         )
 
     def _count_pick(self) -> None:
@@ -309,6 +313,8 @@ class Harness:
         auto_finish_speech: bool = False,
         consent: ConsentManager | None = None,
         provider=None,
+        google=None,
+        spreadsheet_assistant_factory=None,
     ) -> None:
         self.settings = settings
         self.rec = Recorder()
@@ -350,6 +356,8 @@ class Harness:
             assistant_factory=lambda document, chunks: self.assistant,
             downloads=self.downloads,
             devices_provider=lambda: (self.device,),
+            google_factory=(lambda settings: google) if google is not None else None,
+            spreadsheet_assistant_factory=spreadsheet_assistant_factory,
             greet_on_start=False,
         )
 
@@ -729,7 +737,24 @@ def test_abre_excel_de_descargas_por_texto_y_responde(
         extensions=(".docx", ".xlsx", ".xlsm"),
         opener=abiertos.append,
     )
-    item = harness(downloads=downloads).start()
+    consent = ConsentManager(lambda request: True, enabled=False)
+    provider = FakeGemini()
+
+    def make_assistant(workbook):
+        return SpreadsheetAssistant(
+            provider=provider,
+            workbook=workbook,
+            consent=consent,
+            engine=QueryEngine(),
+            today=TODAY,
+        )
+
+    item = harness(
+        downloads=downloads,
+        consent=consent,
+        provider=provider,
+        spreadsheet_assistant_factory=make_assistant,
+    ).start()
 
     item.send("abre el excel de seguimiento tareas")
 

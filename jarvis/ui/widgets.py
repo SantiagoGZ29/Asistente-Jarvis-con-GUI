@@ -565,6 +565,225 @@ class AnalysisPanel(QFrame):
         self.show()
 
 
+class GooglePanel(QFrame):
+    """Sección GOOGLE CONNECT: Gmail y Calendar de solo lectura."""
+
+    connectRequested = Signal()
+    disconnectRequested = Signal()
+    mailRequested = Signal()
+    calendarRequested = Signal()
+    openMailRequested = Signal()
+    openCalendarRequested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("Panel")
+        self._configured = False
+        self._connected = False
+
+        title = QLabel("GOOGLE CONNECT")
+        title.setObjectName("SectionTitle")
+        self.status = QLabel("SIN CONFIGURAR")
+        self.status.setObjectName("Chip")
+        self.status.setStyleSheet(f"color: {theme.DIM};")
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(self.status)
+
+        self.account = QLabel(
+            "Correo y calendario de solo lectura con las API de Google."
+        )
+        self.account.setObjectName("DocMeta")
+        self.account.setWordWrap(True)
+        self.problem = QLabel("")
+        self.problem.setObjectName("Hint")
+        self.problem.setWordWrap(True)
+        self.problem.setVisible(False)
+
+        # Tarjeta de correo
+        self.mail_card = QFrame()
+        self.mail_card.setObjectName("PanelSoft")
+        mail_layout = QVBoxLayout(self.mail_card)
+        mail_layout.setContentsMargins(12, 9, 12, 10)
+        mail_layout.setSpacing(4)
+        mail_title = QLabel("CORREO · SOLO LECTURA")
+        mail_title.setObjectName("SectionTitle")
+        self.mail_state = QLabel("Conecta Google para consultar la bandeja de Gmail.")
+        self.mail_state.setObjectName("DocMeta")
+        self.mail_state.setWordWrap(True)
+        mail_buttons = QHBoxLayout()
+        mail_buttons.setSpacing(6)
+        self.mail_button = QPushButton("Consultar correos")
+        self.mail_button.setObjectName("Primary")
+        self.mail_button.clicked.connect(self.mailRequested.emit)
+        self.open_mail_button = QPushButton("Abrir Gmail")
+        self.open_mail_button.setObjectName("Ghost")
+        self.open_mail_button.clicked.connect(self.openMailRequested.emit)
+        mail_buttons.addWidget(self.mail_button)
+        mail_buttons.addWidget(self.open_mail_button)
+        mail_buttons.addStretch(1)
+        mail_layout.addWidget(mail_title)
+        mail_layout.addWidget(self.mail_state)
+        mail_layout.addLayout(mail_buttons)
+
+        # Tarjeta de calendario
+        self.calendar_card = QFrame()
+        self.calendar_card.setObjectName("PanelSoft")
+        cal_layout = QVBoxLayout(self.calendar_card)
+        cal_layout.setContentsMargins(12, 9, 12, 10)
+        cal_layout.setSpacing(4)
+        cal_title = QLabel("CALENDARIO · SOLO LECTURA")
+        cal_title.setObjectName("SectionTitle")
+        self.calendar_state = QLabel(
+            "Conecta Google para consultar tu calendario."
+        )
+        self.calendar_state.setObjectName("DocMeta")
+        self.calendar_state.setWordWrap(True)
+        cal_buttons = QHBoxLayout()
+        cal_buttons.setSpacing(6)
+        self.calendar_button = QPushButton("Consultar agenda")
+        self.calendar_button.setObjectName("Primary")
+        self.calendar_button.clicked.connect(self.calendarRequested.emit)
+        self.open_calendar_button = QPushButton("Abrir Google Calendar")
+        self.open_calendar_button.setObjectName("Ghost")
+        self.open_calendar_button.clicked.connect(
+            self.openCalendarRequested.emit
+        )
+        cal_buttons.addWidget(self.calendar_button)
+        cal_buttons.addWidget(self.open_calendar_button)
+        cal_buttons.addStretch(1)
+        cal_layout.addWidget(cal_title)
+        cal_layout.addWidget(self.calendar_state)
+        cal_layout.addLayout(cal_buttons)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        self.connect_button = QPushButton("CONECTAR GOOGLE")
+        self.connect_button.setObjectName("Primary")
+        self.connect_button.clicked.connect(self.connectRequested.emit)
+        self.disconnect_button = QPushButton("Desconectar")
+        self.disconnect_button.setObjectName("Ghost")
+        self.disconnect_button.clicked.connect(self.disconnectRequested.emit)
+        actions.addWidget(self.connect_button)
+        actions.addWidget(self.disconnect_button)
+        actions.addStretch(1)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(6)
+        layout.addLayout(header)
+        layout.addWidget(self.account)
+        layout.addWidget(self.problem)
+        layout.addWidget(self.mail_card)
+        layout.addWidget(self.calendar_card)
+        layout.addLayout(actions)
+        self.set_google(None)
+
+    # ------------------------------------------------------------------
+    def set_google(self, info) -> None:
+        if info is None:
+            self._configured = False
+            self._connected = False
+            self.status.setText("SIN CONFIGURAR")
+            self.status.setStyleSheet(f"color: {theme.DIM};")
+            self.account.setText(
+                "Correo y calendario de solo lectura con las API de Google."
+            )
+            self.problem.setVisible(False)
+            self.mail_state.setText(
+                "Conecta Google para consultar la bandeja de Gmail."
+            )
+            self.calendar_state.setText(
+                "Conecta Google para consultar tu calendario."
+            )
+            self._set_buttons(connect=False, disconnect=False, query=False)
+            return
+
+        self._configured = bool(info.configured)
+        self._connected = bool(info.connected)
+        busy = bool(info.busy)
+
+        if busy:
+            label, color = "CONECTANDO…", theme.AMBER
+        elif self._connected:
+            label, color = "CONECTADO", theme.GREEN
+        elif self._configured:
+            label, color = "CONFIGURADO · SIN AUTORIZAR", theme.AMBER
+        else:
+            label, color = "SIN CONFIGURAR", theme.DIM
+        self.status.setText(label)
+        self.status.setStyleSheet(f"color: {color};")
+
+        if self._connected:
+            self.account.setText(
+                "Cuenta: "
+                + (info.account or "Google")
+                + " · solo lectura"
+            )
+        elif self._configured:
+            self.account.setText(
+                "Configurado. Pulsa CONECTAR GOOGLE para autorizar tu cuenta."
+            )
+        else:
+            self.account.setText(
+                "Coloca credentials.json y define GOOGLE_OAUTH_CLIENT_FILE en el "
+                "archivo .env. Consulta el README para crear la aplicación de "
+                "escritorio en Google Cloud."
+            )
+
+        problem = (info.problem or "").strip()
+        self.problem.setText(problem)
+        self.problem.setVisible(bool(problem))
+
+        if not self._connected:
+            self.mail_state.setText(
+                "Conecta Google para consultar la bandeja de Gmail."
+            )
+            self.calendar_state.setText(
+                "Conecta Google para consultar tu calendario."
+            )
+        else:
+            mail_line = "Sin consultas todavía."
+            if info.mail_query:
+                extra = (
+                    f" · {info.unread} sin leer" if info.unread else ""
+                )
+                mail_line = (
+                    f"{info.mail_query}{extra}\n"
+                    f"Últimos {info.mail_count} correos consultados."
+                )
+            elif info.mail_count:
+                mail_line = f"{info.mail_count} correos consultados."
+            self.mail_state.setText(mail_line)
+
+            calendar_line = "Sin consultas todavía."
+            if info.calendar_query:
+                calendar_line = f"Última consulta: {info.calendar_query}."
+            if info.next_event:
+                calendar_line += f"\nPróximo: {info.next_event}"
+            self.calendar_state.setText(calendar_line)
+
+        self._set_buttons(
+            connect=self._configured and not self._connected and not busy,
+            disconnect=self._connected or busy,
+            query=self._connected,
+            busy=busy,
+        )
+
+    def _set_buttons(
+        self, *, connect: bool, disconnect: bool, query: bool, busy: bool = False
+    ) -> None:
+        self.connect_button.setEnabled(bool(connect))
+        self.disconnect_button.setEnabled(bool(disconnect))
+        self.mail_button.setEnabled(bool(query))
+        self.calendar_button.setEnabled(bool(query))
+        self.connect_button.setText(
+            "CONECTANDO…" if busy else "CONECTAR GOOGLE"
+        )
+
+
 class ConversationBubble(QFrame):
     """Mensaje de la conversación con hora y fuentes."""
 

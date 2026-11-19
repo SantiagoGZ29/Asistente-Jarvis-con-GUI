@@ -22,7 +22,7 @@ import queue
 import re
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -47,6 +47,11 @@ from jarvis.core.consent import (
 from jarvis.core.errors import (
     ConsentDeniedError,
     DocumentError,
+    GoogleAuthCancelledError,
+    GoogleAuthExpiredError,
+    GoogleError,
+    GoogleNotConnectedError,
+    GoogleNotConfiguredError,
     JarvisError,
     ProviderNotConfiguredError,
 )
@@ -63,6 +68,9 @@ from jarvis.documents.downloads import (
     SearchResult,
 )
 from jarvis.documents.models import DocumentModel
+from jarvis.integrations.google_calendar import GoogleCalendarAssistant
+from jarvis.integrations.google_mail import GmailAssistant
+from jarvis.integrations.google_session import GoogleSession
 from jarvis.providers.elevenlabs_provider import ElevenLabsProvider
 from jarvis.providers.gemini_provider import GeminiProvider
 from jarvis.spreadsheets.models import SpreadsheetInfo, WorkbookModel
@@ -94,6 +102,18 @@ _DUPLICATE_WINDOW_TEXT = 1.0
 _CITATION_RE = re.compile(r"\[(?:P|T)\d+\]")
 _MARKUP_RE = re.compile(r"[*_#`>]+")
 
+# Seguimiento conversacional de Google: solo se usa cuando hay un contexto
+# de correo o agenda activo y la frase apunta claramente a lo ya mostrado.
+_GOOGLE_FOLLOWUP_RE = re.compile(
+    r"^(?:y\s+)?(?:eso|esto|ese|esa|aquel|aquella)\b"
+    r"|^(?:y\s+)?(?:el|la|los|las)\s+"
+    r"(?:primero|primera|ultimo|ultima|siguiente|proximo|proxima)\b"
+    r"|^(?:y\s+)?(?:quien|quienes|cuando|donde|cuanto|cuanta|cuantos|cuantas)\b"
+    r"|^(?:y\s+)?que\s+(?:dice|dijo|paso|pasa|hay|tengo|contiene)\b"
+    r"|^(?:y\s+)?(?:resumelo|resumela|resume|leelo|leela|dime|detalla|"
+    r"detallame)\b"
+)
+
 _CHAT_SYSTEM_PROMPT = """Eres Mi Jarvis, un asistente personal que responde siempre en español.
 Reglas:
 1. Sé breve: una o tres frases, salvo que el usuario pida detalle.
@@ -108,8 +128,10 @@ Reglas:
 _HELP_TEXT = (
     "Puedo escuchar y conversar, abrir o cargar un documento .docx de "
     "Descargas, resumirlo, explicar un apartado y extraer fechas, acciones o "
-    "responsabilidades. También puedes escribirme. Di «pausa» para detener el "
-    "micrófono, «detente» para callarme o «cancela» para descartar la orden."
+    "responsabilidades. También puedo revisar tus correos de Gmail y tu Google "
+    "Calendar en modo de solo lectura. Puedes escribirme. Di «pausa» para "
+    "detener el micrófono, «detente» para callarme o «cancela» para descartar "
+    "la orden."
 )
 
 
@@ -159,6 +181,25 @@ class DocumentInfo:
         )
 
 
+@dataclass(frozen=True)
+class GoogleInfo:
+    """Estado visible de la integración de solo lectura con Google."""
+
+    configured: bool = False
+    connected: bool = False
+    busy: bool = False
+    account: str = ""
+    problem: str = ""
+    detail: str = ""
+    timezone: str = ""
+    mail_count: int = 0
+    unread: int = 0
+    mail_query: str = ""
+    calendar_count: int = 0
+    calendar_query: str = ""
+    next_event: str = ""
+
+
 @dataclass
 class ControllerCallbacks:
     """Eventos del controlador.
@@ -180,6 +221,7 @@ class ControllerCallbacks:
     on_spreadsheet: Callable[[SpreadsheetInfo | None], None] = _noop
     on_analysis: Callable[[Any], None] = _noop
     on_analysis_choices: Callable[[tuple[str, ...]], None] = _noop
+    on_google: Callable[[GoogleInfo], None] = _noop
     on_choices: Callable[[tuple[str, ...]], None] = _noop
     on_pick_document: Callable[[], None] = _noop
     on_exit: Callable[[], None] = _noop
@@ -241,6 +283,7 @@ class Controller:
         loader: Callable[[Path | str], DocumentModel] | None = None,
         spreadsheet_loader: Callable[[Path | str], WorkbookModel] | None = None,
         spreadsheet_assistant_factory: Callable[[WorkbookModel], Any] | None = None,
+        google_factory: Callable[[Settings], Any] | None = None,
         devices_provider: Callable[[], tuple[InputDevice, ...]] | None = None,
         greet_on_start: bool = True,
         clock: Callable[[], float] = time.monotonic,
@@ -259,6 +302,7 @@ class Controller:
         self._loader = loader or load_document
         self._spreadsheet_loader = spreadsheet_loader
         self._spreadsheet_assistant_factory = spreadsheet_assistant_factory
+        self._google_factory = google_factory or GoogleSession
         self._devices_provider = devices_provider
         self._greet_on_start = bool(greet_on_start)
         self._clock = clock
@@ -291,6 +335,13 @@ class Controller:
         self._workbook: WorkbookModel | None = None
         self._spreadsheet_assistant: Any | None = None
         self._pending_choices: tuple[DocumentMatch, ...] = ()
+
+        self._google: Any | None = None
+        self._mail_assistant: Any | None = None
+        self._calendar_assistant: Any | None = None
+        self._google_context = ""
+        self._google_connecting = False
+        self._google_cancel_requested = False
 
         self._history: list[tuple[str, str]] = []
         self._recent: list[tuple[float, str]] = []
@@ -416,6 +467,41 @@ class Controller:
             lambda: self._load_spreadsheet_and_report(target, opened=False)
         )
 
+    # ------------------------------------------------------------------
+    # Google: Gmail y Google Calendar (solo lectura)
+    # ------------------------------------------------------------------
+    def google_info(self) -> GoogleInfo:
+        """Estado actual para la sección GOOGLE CONNECT."""
+        return self._google_snapshot()
+
+    def connect_google(self) -> None:
+        self._submit(self._connect_google_task)
+
+    def disconnect_google(self) -> None:
+        self._submit(self._disconnect_google_task)
+
+    def cancel_google(self) -> None:
+        """Solicita cancelar la espera del navegador sin bloquear la interfaz."""
+        self._google_cancel_requested = True
+        session = self._google
+        if session is not None:
+            try:
+                session.cancel()
+            except Exception:  # pragma: no cover - cancelación defensiva
+                logger.warning("No se pudo cancelar la conexión de Google")
+
+    def refresh_mail(self) -> None:
+        generation = self._snapshot_generation()
+        self._submit(lambda: self._mail_task("review", generation=generation))
+
+    def refresh_calendar(self, period: str = "today") -> None:
+        generation = self._snapshot_generation()
+        self._submit(
+            lambda: self._calendar_task(
+                "agenda", period=period, generation=generation
+            )
+        )
+
     def choose_candidate(self, index: int) -> None:
         self._submit(lambda: self._open_candidate(index))
 
@@ -477,6 +563,11 @@ class Controller:
             "workbook": (
                 self._workbook.name if self._workbook is not None else ""
             ),
+            "google": (
+                "conectado"
+                if self._google_connected()
+                else ("configurado" if self._google_configured() else "no configurado")
+            ),
         }
 
     health = attachments
@@ -529,6 +620,7 @@ class Controller:
         self._set_state(AssistantState.STARTING, "arranque")
         for warning in self.settings.warnings:
             self._notice(warning)
+        self._publish_google()
         if self.settings.auto_listen:
             self._setup_microphone()
         else:
@@ -910,6 +1002,71 @@ class Controller:
             )
             return
 
+        # ------------------------------------------------------------------
+        # Google (solo lectura). Se resuelve antes que Word, Excel y chat.
+        # ------------------------------------------------------------------
+        if name == intents.GOOGLE_STATUS:
+            self._google_status_task(intent.mode)
+            return
+        if name == intents.MAIL_REVIEW:
+            self._mail_task("review", generation=generation)
+            return
+        if name == intents.MAIL_COUNT:
+            self._mail_task("count", generation=generation)
+            return
+        if name == intents.MAIL_READ:
+            if (intent.mode or "") == "last":
+                self._mail_task("last", generation=generation)
+            else:
+                self._mail_task(
+                    "read",
+                    query=intent.query or "",
+                    mode=intent.mode or "",
+                    generation=generation,
+                )
+            return
+        if name == intents.MAIL_FOLLOWUP:
+            self._mail_task("follow", text=text, generation=generation)
+            return
+        if name == intents.CALENDAR_AGENDA:
+            self._calendar_task(
+                "agenda",
+                period=intent.period or "today",
+                generation=generation,
+            )
+            return
+        if name == intents.CALENDAR_NEXT:
+            self._calendar_task("next", generation=generation)
+            return
+        if name == intents.CALENDAR_FOLLOWUP:
+            self._calendar_task("follow", text=text, generation=generation)
+            return
+
+        # Preguntas y resúmenes que continúan el correo o la agenda ya
+        # mostrados. Sin contexto activo o sin señales claras, se responde con
+        # el flujo normal de documento, Excel o conversación.
+        if name in {
+            intents.QUESTION,
+            intents.SUMMARY,
+            intents.EXPLAIN,
+        } and self._google_context:
+            if self._google_followup(text):
+                if self._google_context == "mail":
+                    if name == intents.SUMMARY:
+                        self._mail_task("summary", generation=generation)
+                    else:
+                        self._mail_task(
+                            "follow", text=text, generation=generation
+                        )
+                else:
+                    if name == intents.SUMMARY:
+                        self._calendar_task("summary", generation=generation)
+                    else:
+                        self._calendar_task(
+                            "follow", text=text, generation=generation
+                        )
+                return
+
         if name in {
             intents.SUMMARY,
             intents.SUMMARY_SECTION,
@@ -1262,6 +1419,347 @@ class Controller:
                     self._workbook
                 )
         return self._spreadsheet_assistant
+
+    # ------------------------------------------------------------------
+    # Google: Gmail y Google Calendar (solo lectura)
+    # ------------------------------------------------------------------
+    def _ensure_google(self) -> Any:
+        if self._google is None:
+            with self._emit_lock:
+                if self._google is None:
+                    self._google = self._google_factory(self.settings)
+        return self._google
+
+    def _google_configured(self) -> bool:
+        try:
+            return bool(self._ensure_google().configured)
+        except Exception:  # pragma: no cover - sesión defensiva
+            return False
+
+    def _google_connected(self) -> bool:
+        try:
+            return bool(self._ensure_google().connected)
+        except Exception:  # pragma: no cover - sesión defensiva
+            return False
+
+    def _google_snapshot(self) -> GoogleInfo:
+        session = self._ensure_google()
+        try:
+            status = dict(session.status())
+        except Exception:  # pragma: no cover - estado defensivo
+            status = {}
+        mail = self._mail_assistant
+        calendar = self._calendar_assistant
+        messages = tuple(getattr(mail, "messages", ()) or ())
+        unread = sum(1 for item in messages if not getattr(item, "is_read", True))
+        window = getattr(calendar, "window", None)
+        next_event = ""
+        if window is not None and getattr(window, "events", ()):
+            events = tuple(window.events)
+            upcoming = events
+            try:
+                now = calendar.service.now()
+                upcoming = tuple(event for event in events if event.end >= now) or events
+            except Exception:  # pragma: no cover - reloj defensivo
+                pass
+            first = upcoming[0]
+            next_event = f"«{first.subject_label}» · {first.range_label}"
+        return GoogleInfo(
+            configured=bool(status.get("configured")),
+            connected=bool(status.get("connected")),
+            busy=bool(self._google_connecting),
+            account=str(status.get("account") or ""),
+            problem=str(status.get("problem") or ""),
+            detail=str(status.get("detail") or ""),
+            timezone=str(status.get("timezone") or ""),
+            mail_count=len(messages),
+            unread=unread,
+            mail_query=str(getattr(mail, "last_query", "") or ""),
+            calendar_count=int(getattr(window, "count", 0) or 0),
+            calendar_query=str(getattr(calendar, "last_query", "") or ""),
+            next_event=next_event,
+        )
+
+    def _publish_google(self) -> None:
+        if self._closed:
+            return
+        try:
+            info = self._google_snapshot()
+        except Exception:  # pragma: no cover - nunca rompe la interfaz
+            logger.warning("No se pudo publicar el estado de Google")
+            return
+        self._emit(self.callbacks.on_google, info)
+
+    def _google_status_task(self, mode: str) -> None:
+        if mode == "connect":
+            self._connect_google_task()
+            return
+        if mode == "disconnect":
+            self._disconnect_google_task()
+            return
+        self._publish_google()
+        info = self._google_snapshot()
+        if not info.configured:
+            self._respond(
+                info.problem
+                or "Google no está configurado. Coloca credentials.json y "
+                "define GOOGLE_OAUTH_CLIENT_FILE en el archivo .env; consulta "
+                "el README para crear la aplicación de escritorio."
+            )
+            return
+        if info.connected:
+            account = info.account or "tu cuenta de Google"
+            self._respond(
+                f"Google está conectado con {account}. Puedo revisar tus "
+                "últimos correos de Gmail y tu Google Calendar, siempre en modo "
+                "de solo lectura."
+            )
+            return
+        self._respond(
+            "Google está configurado pero todavía no está conectado. Pulsa "
+            "«CONECTAR GOOGLE» o dime «conecta Google» para autorizar la "
+            "cuenta en el navegador."
+        )
+
+    def _connect_google_task(self) -> None:
+        if self._closed:
+            return
+        session = self._ensure_google()
+        if session.connected:
+            self._publish_google()
+            self._respond(
+                f"Google ya está conectado con {session.account or 'tu cuenta'}."
+            )
+            return
+        if not session.configured:
+            self._publish_google()
+            self._fail_message(
+                session.problem
+                or "Google no está configurado. Revisa GOOGLE_OAUTH_CLIENT_FILE "
+                "en el .env."
+            )
+            return
+
+        self._google_cancel_requested = False
+        self._google_connecting = True
+        self._publish_google()
+        self._notice(
+            "Se abrirá tu navegador predeterminado para autorizar la cuenta de "
+            "Google. Concede solo los permisos de lectura de Gmail y Calendar."
+        )
+        try:
+            account = session.connect()
+        except GoogleAuthCancelledError as exc:
+            if self._google_cancel_requested:
+                self._notice("Conexión con Google cancelada.")
+            else:
+                self._fail_message(exc.user_message)
+            return
+        except GoogleError as exc:
+            self._fail_message(exc.user_message)
+            return
+        except Exception as exc:  # pragma: no cover - fallo defensivo
+            logger.warning(
+                "Fallo inesperado al conectar Google: %s", type(exc).__name__
+            )
+            self._fail_message(
+                "No se pudo conectar con Google. Comprueba la configuración de "
+                "Google Cloud y tu conexión a Internet."
+            )
+            return
+        finally:
+            self._google_connecting = False
+            self._publish_google()
+        if self._closed:
+            return
+        self._google_context = ""
+        self._respond(
+            f"Google quedó conectado con {account or 'tu cuenta'}. Puedo "
+            "revisar tus últimos correos de Gmail y tu Google Calendar; nunca "
+            "envío, borro ni modifico nada."
+        )
+
+    def _disconnect_google_task(self) -> None:
+        session = self._ensure_google()
+        was_connected = session.connected
+        self._clear_google_assistants()
+        try:
+            session.disconnect()
+        except Exception:  # pragma: no cover - cierre defensivo
+            logger.warning("No se pudo desconectar Google")
+        self._publish_google()
+        if was_connected:
+            self._respond(
+                "He desconectado Google y borré el token guardado por Jarvis. "
+                "Tu sesión de Google sigue abierta en el navegador."
+            )
+        else:
+            self._respond("Google ya estaba desconectado.")
+
+    def _connected_session(self) -> Any:
+        session = self._ensure_google()
+        if not session.configured:
+            raise GoogleNotConfiguredError(
+                session.problem
+                or "Google no está configurado. Revisa GOOGLE_OAUTH_CLIENT_FILE "
+                "en el .env."
+            )
+        if not session.connected:
+            raise GoogleNotConnectedError()
+        return session
+
+    def _google_provider(self) -> Any | None:
+        if self._provider is not None:
+            return self._provider
+        if not self.settings.gemini_configured:
+            return None
+        try:
+            return self._ensure_provider()
+        except Exception:  # pragma: no cover - configuración incompleta
+            return None
+
+    def _ensure_mail_assistant(self) -> Any:
+        if self._mail_assistant is None:
+            session = self._connected_session()
+            self._mail_assistant = GmailAssistant(
+                session.mail_service(),
+                provider=self._google_provider(),
+                consent=self._consent,
+                max_context_chars=self.settings.max_context_chars,
+            )
+        return self._mail_assistant
+
+    def _ensure_calendar_assistant(self) -> Any:
+        if self._calendar_assistant is None:
+            session = self._connected_session()
+            self._calendar_assistant = GoogleCalendarAssistant(
+                session.calendar_service(),
+                provider=self._google_provider(),
+                consent=self._consent,
+                max_context_chars=self.settings.max_context_chars,
+            )
+        return self._calendar_assistant
+
+    def _clear_google_assistants(self) -> None:
+        self._mail_assistant = None
+        self._calendar_assistant = None
+        self._google_context = ""
+
+    def _mail_task(
+        self,
+        action: str,
+        *,
+        query: str = "",
+        mode: str = "",
+        text: str = "",
+        generation: int | None = None,
+    ) -> None:
+        try:
+            assistant = self._ensure_mail_assistant()
+            if action == "review":
+                answer = assistant.review()
+            elif action == "count":
+                answer = assistant.count()
+            elif action == "last":
+                answer = assistant.read_last()
+            elif action == "read":
+                answer = assistant.read_matching(query, mode=mode)
+            elif action == "summary":
+                answer = assistant.summarize_active()
+            else:
+                answer = assistant.follow_up(text)
+        except GoogleError as exc:
+            self._handle_google_error(exc)
+            return
+        except JarvisError as exc:
+            self._fail_message(exc.user_message)
+            return
+        except Exception as exc:  # pragma: no cover - fallo defensivo
+            logger.warning(
+                "Fallo al consultar el correo de Gmail: %s", type(exc).__name__
+            )
+            self._fail_message(
+                "No pude procesar el correo de Gmail. Inténtalo de nuevo."
+            )
+            return
+        if generation is not None and not self._current(generation):
+            return
+        self._google_context = "mail"
+        self._publish_google()
+        self._respond(answer)
+
+    def _calendar_task(
+        self,
+        action: str,
+        *,
+        period: str = "today",
+        text: str = "",
+        generation: int | None = None,
+    ) -> None:
+        try:
+            assistant = self._ensure_calendar_assistant()
+            if action == "agenda":
+                answer = assistant.agenda(period or "today")
+            elif action == "next":
+                answer = assistant.next_event()
+            elif action == "summary":
+                answer = assistant.summarize()
+            else:
+                answer = assistant.follow_up(text)
+        except GoogleError as exc:
+            self._handle_google_error(exc)
+            return
+        except JarvisError as exc:
+            self._fail_message(exc.user_message)
+            return
+        except Exception as exc:  # pragma: no cover - fallo defensivo
+            logger.warning(
+                "Fallo al consultar la agenda de Google: %s", type(exc).__name__
+            )
+            self._fail_message(
+                "No pude procesar la agenda de Google Calendar. Inténtalo de "
+                "nuevo."
+            )
+            return
+        if generation is not None and not self._current(generation):
+            return
+        self._google_context = "calendar"
+        self._publish_google()
+        self._respond(answer)
+
+    def _handle_google_error(self, exc: GoogleError) -> None:
+        if isinstance(exc, GoogleAuthExpiredError):
+            session = self._google
+            if session is not None:
+                try:
+                    session.mark_expired()
+                except Exception:  # pragma: no cover - cierre defensivo
+                    pass
+            self._clear_google_assistants()
+            self._publish_google()
+        elif isinstance(exc, GoogleNotConnectedError):
+            self._clear_google_assistants()
+            self._publish_google()
+        self._fail_message(exc.user_message)
+
+    def _google_followup(self, text: str) -> bool:
+        normalized = intents.normalize(text)
+        if not normalized:
+            return False
+        if self._google_context == "mail" and re.search(
+            r"\b(correo|correos|mensaje|mensajes|remitente|asunto|bandeja|"
+            r"gmail|adjunto|adjuntos)\b",
+            normalized,
+        ):
+            return True
+        if self._google_context == "calendar" and re.search(
+            r"\b(reunion|reuniones|evento|eventos|agenda|calendario|cita|citas|"
+            r"junta|juntas|participante|participantes|asistente|asistentes|"
+            r"invitado|invitados)\b",
+            normalized,
+        ):
+            return True
+        return bool(_GOOGLE_FOLLOWUP_RE.search(normalized))
 
     def _ask_for_picker(self) -> None:
         self._emit(self.callbacks.on_pick_document)
@@ -1888,6 +2386,8 @@ class Controller:
     # ------------------------------------------------------------------
     def _shutdown(self) -> None:
         try:
+            self._clear_google_assistants()
+            self._google = None
             self._teardown_audio()
             speech = self._speech
             self._speech = None

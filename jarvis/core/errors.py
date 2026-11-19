@@ -85,6 +85,90 @@ class SpreadsheetLimitError(SpreadsheetError):
     )
 
 
+class GoogleError(JarvisError):
+    """Fallo de la integración de solo lectura con Gmail y Google Calendar."""
+
+    default_message = "No se pudo completar la operación con Google."
+
+
+class GoogleNotConfiguredError(GoogleError):
+    default_message = (
+        "Google no está configurado. Descarga el archivo credentials.json de "
+        "una aplicación de escritorio de Google Cloud, colócalo en el proyecto "
+        "y define GOOGLE_OAUTH_CLIENT_FILE en el archivo .env. Consulta el "
+        "README para crear las credenciales."
+    )
+
+
+class GoogleNotConnectedError(GoogleError):
+    default_message = (
+        "Google no está conectado. Pulsa «CONECTAR GOOGLE» en la ventana para "
+        "autorizar tu cuenta con el navegador. Word, Excel y el resto de "
+        "funciones siguen disponibles."
+    )
+
+
+class GoogleAuthCancelledError(GoogleError):
+    default_message = (
+        "Se canceló la conexión con Google. Puedes volver a intentarlo con "
+        "«CONECTAR GOOGLE»."
+    )
+
+
+class GoogleConsentDeniedError(GoogleError):
+    default_message = (
+        "No se concedieron los permisos de Google, así que la conexión se "
+        "canceló. Jarvis solo necesita permiso de lectura de Gmail y de "
+        "Google Calendar."
+    )
+
+
+class GoogleAccessBlockedError(GoogleError):
+    default_message = (
+        "Google bloqueó el acceso de la aplicación. Comprueba que la "
+        "aplicación OAuth está publicada o que tu cuenta aparece como usuario "
+        "de prueba en Google Cloud. Jarvis no intenta evitar esa política."
+    )
+
+
+class GoogleAuthExpiredError(GoogleError):
+    default_message = (
+        "La sesión de Google venció, el token ya no es válido o se revocaron "
+        "los permisos. Pulsa «CONECTAR GOOGLE» para volver a autorizar la "
+        "cuenta."
+    )
+
+
+class GoogleForbiddenError(GoogleError):
+    default_message = (
+        "Google rechazó la consulta (error 403). Comprueba que la aplicación "
+        "tiene los permisos gmail.readonly y calendar.events.readonly "
+        "concedidos para tu cuenta."
+    )
+
+
+class GoogleRateLimitError(GoogleError):
+    default_message = (
+        "Google limitó temporalmente las solicitudes (error 429). Jarvis "
+        "respetó el tiempo de espera indicado y no hace reintentos "
+        "ilimitados. Inténtalo de nuevo en unos segundos."
+    )
+
+
+class GoogleNetworkError(GoogleError):
+    default_message = (
+        "No se pudo conectar con Google. Comprueba tu conexión a Internet; el "
+        "resto de funciones de Jarvis siguen disponibles."
+    )
+
+
+class GoogleApiError(GoogleError):
+    default_message = (
+        "Google devolvió una respuesta que Jarvis no pudo procesar. "
+        "Inténtalo de nuevo en unos minutos."
+    )
+
+
 class ProviderError(JarvisError):
     default_message = "El proveedor de inteligencia artificial no está disponible."
 

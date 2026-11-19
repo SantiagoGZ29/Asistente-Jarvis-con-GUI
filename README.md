@@ -1,8 +1,8 @@
 # Mi Jarvis — asistente personal de escritorio
 
-Asistente para **Windows 10/11** con interfaz gráfica **PySide6**, conversación por **voz continua** y control por **texto**. Lee documentos de Word (`.docx`) y libros de Excel (`.xlsx`/`.xlsm`), responde preguntas sobre su contenido con **Google Gemini**, calcula los datos de Excel en local y en **solo lectura**, habla y transcribe con **ElevenLabs** y puede **abrir archivos que estén en tu carpeta real de Descargas** cuando se lo pides por voz.
+Asistente para **Windows 10/11** con interfaz gráfica **PySide6**, conversación por **voz continua** y control por **texto**. Lee documentos de Word (`.docx`) y libros de Excel (`.xlsx`/`.xlsm`), responde preguntas sobre su contenido con **Google Gemini**, calcula los datos de Excel en local y en **solo lectura**, habla y transcribe con **ElevenLabs**, puede **abrir archivos que estén en tu carpeta real de Descargas** cuando se lo pides por voz y consulta tu **correo de Gmail y tu Google Calendar en modo de solo lectura** con las API oficiales de Google.
 
-> **Estado:** versión funcional de escritorio. La ventana gráfica es la forma normal de uso; la consola se conserva con `--console`. Los asistentes de Correo, Agenda, Tareas y Reportes **no** están implementados.
+> **Estado:** versión funcional de escritorio. La ventana gráfica es la forma normal de uso; la consola se conserva con `--console`. La integración de **Gmail y Google Calendar (correo y agenda) está implementada y cubierta por pruebas con respuestas simuladas**, pero la conexión con una cuenta real requiere crear una aplicación de escritorio en Google Cloud y **no se ha verificado todavía con una cuenta autenticada**. Los asistentes de Tareas y Reportes **no** están implementados.
 
 ---
 
@@ -21,14 +21,16 @@ Asistente para **Windows 10/11** con interfaz gráfica **PySide6**, conversació
 11. [Abrir documentos de Descargas por voz](#abrir-documentos-de-descargas-por-voz)
 12. [Documento activo y preguntas](#documento-activo-y-preguntas)
 13. [Análisis de Excel en modo solo lectura](#análisis-de-excel-en-modo-solo-lectura)
-14. [Privacidad: qué datos salen del equipo](#privacidad-qué-datos-salen-del-equipo)
-15. [Cómo funciona por dentro](#cómo-funciona-por-dentro)
-16. [Pruebas automatizadas](#pruebas-automatizadas)
-17. [Qué está verificado y qué no](#qué-está-verificado-y-qué-no)
-18. [Errores frecuentes y soluciones](#errores-frecuentes-y-soluciones)
-19. [Limitaciones conocidas](#limitaciones-conocidas)
-20. [Estructura del proyecto](#estructura-del-proyecto)
-21. [Hoja de ruta](#hoja-de-ruta)
+14. [Correo y agenda de Google en solo lectura](#correo-y-agenda-de-google-en-solo-lectura)
+15. [Cómo conectar Gmail y Google Calendar con Jarvis](#cómo-conectar-gmail-y-google-calendar-con-jarvis)
+16. [Privacidad: qué datos salen del equipo](#privacidad-qué-datos-salen-del-equipo)
+17. [Cómo funciona por dentro](#cómo-funciona-por-dentro)
+18. [Pruebas automatizadas](#pruebas-automatizadas)
+19. [Qué está verificado y qué no](#qué-está-verificado-y-qué-no)
+20. [Errores frecuentes y soluciones](#errores-frecuentes-y-soluciones)
+21. [Limitaciones conocidas](#limitaciones-conocidas)
+22. [Estructura del proyecto](#estructura-del-proyecto)
+23. [Hoja de ruta](#hoja-de-ruta)
 
 ---
 
@@ -42,6 +44,8 @@ Asistente para **Windows 10/11** con interfaz gráfica **PySide6**, conversació
 - **Abre un `.docx` de Descargas por voz**: «abre el documento informe de Descargas». La búsqueda ignora acentos y mayúsculas, y **pregunta cuál abrir** si hay varios parecidos; nunca elige en silencio.
 - **Abre y analiza libros de Excel por voz**: «abre el Excel de tareas de Descargas». Admite `.xlsx` y `.xlsm`, localiza encabezados y tablas, y responde con conteos, sumas, filtros, agrupaciones, fechas, fórmulas y calidad de datos **calculados en Python**.
 - Trata Word y Excel como **un único recurso activo**: al abrir uno, el otro se descarga y el contexto de las preguntas se reinicia para no mezclar datos.
+- **Consulta tu correo de Gmail y tu Google Calendar en solo lectura** con las API oficiales: lista los 20 correos más recientes de la bandeja, abre únicamente el que pides y muestra la agenda de hoy, mañana, la semana laboral o los próximos siete días en tu zona horaria.
+- **Nunca envía, responde, marca, mueve ni borra correos, ni crea o modifica eventos.** Solo solicita `gmail.readonly` y `calendar.events.readonly`, y no descarga adjuntos.
 - Carga el documento para **resumir, explicar y responder preguntas**, con fuentes por párrafo/tabla y sin inventar datos.
 - Mantiene una **conversación libre breve** cuando no hay documento abierto, con historial acotado.
 - Permite **escribir** en cualquier momento: si el micrófono falla, no hay claves o rechazas permisos, el modo texto sigue funcionando.
@@ -52,11 +56,12 @@ Asistente para **Windows 10/11** con interfaz gráfica **PySide6**, conversació
 
 - **Windows 10 u 11**.
 - **Python 3.11 o superior** (probado con 3.12.2).
-- Conexión a Internet para Gemini y ElevenLabs.
+- Conexión a Internet para Gemini, ElevenLabs y, si lo conectas, las API de Google (Gmail y Calendar).
 - Micrófono y altavoces/auriculares para la conversación por voz (opcionales).
 - Cuenta gratuita de **Google AI Studio** (Gemini) y, opcionalmente, de **ElevenLabs**.
+- Para Gmail y Calendar: una cuenta de Google y un proyecto gratuito en **Google Cloud** con una credencial OAuth de tipo **Aplicación de escritorio**.
 
-Dependencias principales: `google-genai`, `elevenlabs`, `python-docx`, `openpyxl`, `sounddevice`, `python-dotenv`, **`PySide6-Essentials`** y `pytest`. No se usa NumPy ni `webrtcvad`: el audio se procesa como PCM entero de 16 bits con la biblioteca estándar, y `openpyxl` lee Excel sin automatizar Excel ni ejecutar macros.
+Dependencias principales: `google-genai`, `elevenlabs`, `python-docx`, `openpyxl`, `sounddevice`, `python-dotenv`, **`PySide6-Essentials`**, `google-api-python-client`, `google-auth`, `google-auth-httplib2`, `google-auth-oauthlib`, `tzdata` y `pytest`. No se usa NumPy ni `webrtcvad`: el audio se procesa como PCM entero de 16 bits con la biblioteca estándar, y `openpyxl` lee Excel sin automatizar Excel ni ejecutar macros.
 
 ## Instalación en Windows PowerShell
 
@@ -98,12 +103,13 @@ python main.py
 
 La primera vez que abres la ventana, Jarvis muestra un diálogo de **consentimiento explícito** antes de crear el controlador:
 
-- Cinco casillas, **todas desmarcadas al empezar**:
+- Seis casillas, **todas desmarcadas al empezar**:
   1. **Micrófono:** enviar tu voz a ElevenLabs para transcribirla.
   2. **Voz:** enviar el texto de las respuestas a ElevenLabs para leerlo.
   3. **Documentos:** enviar fragmentos del documento a Google Gemini.
   4. **Excel:** enviar tu pregunta y un resumen acotado del libro a Google Gemini para interpretarla o redactar la respuesta.
   5. **Conversación:** enviar tus mensajes a Google Gemini cuando no hay documento.
+  6. **Google:** enviar únicamente el correo o los eventos **que ya has seleccionado** a Google Gemini para resumirlos. La consulta del buzón y la agenda con las API de Google no usa Gemini.
 - Puedes marcar solo lo que quieras y pulsar **Empezar**.
 - **Solo modo texto** deniega todos los permisos, guarda la aceptación, desactiva la escucha automática y la lectura en voz alta, y arranca sin micrófono ni voz.
 
@@ -153,6 +159,10 @@ JARVIS_STT_MODE=realtime
 JARVIS_AUTO_LISTEN=true
 JARVIS_INPUT_DEVICE=
 JARVIS_LOG_LEVEL=INFO
+
+# Gmail y Google Calendar de solo lectura (opcional)
+GOOGLE_OAUTH_CLIENT_FILE=credentials.json
+GOOGLE_TIMEZONE=America/Santiago
 ```
 
 Reglas importantes:
@@ -201,6 +211,8 @@ Reglas importantes:
 | `JARVIS_SPREADSHEET_MAX_CONTEXT_CHARS` | No | Contexto máximo de Excel enviado a Gemini (por defecto `6000`). |
 | `JARVIS_SPREADSHEET_HEADER_SCAN_ROWS` | No | Filas iniciales examinadas para localizar el encabezado (por defecto `12`). |
 | `JARVIS_SPREADSHEET_TIMEOUT_S` | No | Tiempo máximo de una consulta de Excel en segundos (por defecto `20`). |
+| `GOOGLE_OAUTH_CLIENT_FILE` | Solo para Gmail y Calendar | Ruta del JSON de la aplicación OAuth de escritorio. Por defecto `credentials.json`. Sin archivo válido, GOOGLE CONNECT queda desactivado. |
+| `GOOGLE_TIMEZONE` | No | Zona horaria para mostrar eventos. Por defecto `America/Santiago`; si no es válida, se usa esa y se avisa. |
 | `JARVIS_LOG_LEVEL` | No | `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 
 ## Cómo obtener las claves
@@ -274,6 +286,7 @@ La ventana tiene seis zonas:
    - Mensajes con hora, autor y fuentes (`P#`/`T#`).
    - Tarjeta del **documento activo** con párrafos, tablas, encabezados y caracteres, o tarjeta del **libro activo** con hojas, filas, columnas, fórmulas y tablas.
    - Panel de **resultado del análisis** con métricas, tabla, fuentes y avisos de calidad.
+   - Sección **GOOGLE CONNECT** con el estado de Gmail y Google Calendar, cuenta conectada y última consulta.
    - Lista de candidatos cuando hay ambigüedad.
 6. **Controles**
    - Pausar/reanudar micrófono, detener voz, probar micrófono.
@@ -556,6 +569,172 @@ Solo se admiten `.xlsx` y `.xlsm`. Los formatos antiguos `.xls` y binarios `.xls
 
 Gemini actúa solo como **intérprete del lenguaje** (elegir hoja, columna u operación) y como **redactor** de la explicación a partir de hechos ya calculados. Nunca calcula, nunca genera código y nunca ve el libro completo. La primera vez pide un consentimiento específico (**Excel**) distinto del de Word; si lo rechazas, las consultas deterministas y los cálculos locales siguen funcionando.
 
+## Correo y agenda de Google en solo lectura
+
+Jarvis se conecta **directamente a las API de Gmail y Google Calendar** con las bibliotecas oficiales `google-api-python-client` y `google-auth`. No usa navegador automatizado, Selenium, Playwright, scraping de HTML, IMAP/SMTP, contraseñas ni servicios intermediarios. La autenticación es **OAuth 2.0 de escritorio con PKCE**: al conectar se abre el navegador predeterminado, autorizas la cuenta y Google redirige a un servidor local efímero. Jarvis no pide ni guarda tu contraseña. El token se guarda cifrado con **DPAPI** de Windows o, si el cifrado no está disponible, solo en memoria.
+
+### Qué puede hacer
+
+| Servicio | Consulta | Límites |
+|---|---|---|
+| **Correo** | Lista los **20 correos más recientes** de la bandeja de entrada (`INBOX`), ordenados del más nuevo al más antiguo, con remitente, asunto, fecha, fragmento, estado de lectura, importancia y adjuntos. | Los metadatos se piden con `users.messages.get(format="metadata")`; solo se descarga el cuerpo del correo que eliges, con `format="full"`. |
+| **Correo** | Dice cuántos hay, cuántos están sin leer, cuántos son de importancia alta y cuántos tienen adjuntos. | No descarga adjuntos, no marca como leído, no mueve ni borra. |
+| **Agenda** | Hoy, mañana, la semana laboral (lunes a viernes), los **próximos siete días** o un día concreto de la semana. | Usa `events.list` con `calendarId="primary"`, `singleEvents=True` y `orderBy="startTime"`, que resuelve las ocurrencias de eventos recurrentes. |
+
+- Gmail procesa mensajes **multipart**, **HTML** y **Base64 URL-safe**; el HTML se convierte a **texto legible** y la ventana nunca muestra etiquetas HTML.
+- Los eventos se solicitan en la zona `GOOGLE_TIMEZONE` y se convierten con `zoneinfo`. **Nunca se presenta una hora UTC como si fuera local**, y los eventos de día completo se muestran como «todo el día».
+- El correo y la agenda tienen **contextos separados**. Un seguimiento como «¿quién lo envió?» se aplica al correo mostrado; «¿dónde es la reunión?» se aplica a la agenda. Al cambiar de servicio, el contexto anterior se descarta.
+- **No se carga el buzón al arrancar** ni se sincroniza en segundo plano. Cada consulta nace de una orden, un botón o una pregunta de seguimiento.
+- La lista usa paginación (`nextPageToken`) hasta completar el límite de 20 correos o de eventos, sin bucles infinitos.
+
+### Órdenes que entiende
+
+```text
+Revisa mis correos
+¿Cuántos correos tengo sin leer?
+Lee el último correo
+Lee el correo de Ana
+Busca el correo con asunto presupuesto
+¿Quién lo envió?
+¿Qué dice el correo?
+¿Cuándo lo recibí?
+¿Tiene adjuntos?
+Resume el correo
+
+Consulta mi agenda de hoy
+¿Qué tengo mañana?
+Muéstrame las reuniones de esta semana
+¿Qué tengo en los próximos siete días?
+¿Qué tengo el lunes?
+¿Cuál es mi próxima reunión?
+¿Dónde es la reunión?
+¿Quiénes participan?
+Resume la agenda
+Estado de Google
+Conecta Google
+Desconecta Google
+```
+
+### Botones de la ventana
+
+La sección **GOOGLE CONNECT** muestra dos tarjetas:
+
+- **CORREO · SOLO LECTURA:** estado real, cuenta conectada, última consulta, cantidad de correos y no leídos.
+- **CALENDARIO · SOLO LECTURA:** estado, última consulta, cantidad de eventos y próximo evento.
+
+Incluye **CONECTAR GOOGLE**, **Consultar correos**, **Abrir Gmail**, **Consultar agenda**, **Abrir Google Calendar** y **Desconectar**. Los botones Abrir llevan a <https://mail.google.com/> y <https://calendar.google.com/calendar/>. La autenticación y las consultas se ejecutan **fuera del hilo de Qt**; la ventana solo dibuja el resultado.
+
+Estados del panel: **SIN CONFIGURAR**, **CONFIGURADO · SIN AUTORIZAR**, **CONECTANDO…** y **CONECTADO**. Si falta el archivo de credenciales, el panel explica qué hacer sin bloquear el resto de Jarvis.
+
+### Seguridad y privacidad
+
+- Solo se solicitan los permisos exactos de lectura `https://www.googleapis.com/auth/gmail.readonly` y `https://www.googleapis.com/auth/calendar.events.readonly`. No se piden permisos de envío, escritura, etiquetado ni administración, y el código no descarga adjuntos.
+- El cliente de solo lectura expone únicamente cuatro operaciones: perfil de Gmail, lista de mensajes, detalle de un mensaje y lista de eventos. No hay ninguna ruta pública para enviar, modificar, archivar o borrar.
+- No se descargan adjuntos ni se marcan correos como leídos: leer un correo no cambia su estado en Gmail.
+- El contenido de correos y eventos se trata como **información no confiable**: si un mensaje contiene instrucciones, Jarvis no las obedece.
+- No se guardan correos, cuerpos ni eventos en disco. El token se guarda cifrado con DPAPI en `%LOCALAPPDATA%\MiJarvis\google_token_cache.bin`; la desconexión lo borra.
+- Al leer con ElevenLabs, Jarvis avisa de que **el texto de la respuesta se transmite al proveedor de voz**, igual que con las respuestas del documento.
+- Gemini solo recibe el **correo seleccionado** o los **eventos de la agenda consultada** para resumirlos, nunca el buzón o el calendario completos, y solo si concediste el permiso **Google**.
+
+## Cómo conectar Gmail y Google Calendar con Jarvis
+
+Esta guía crea una aplicación propia de **Google Cloud** para que Jarvis pueda pedir permiso a tu cuenta. Es gratis y no necesitas cuenta de servicio ni contraseña. La conexión real no se puede probar sin completar estos pasos con tu cuenta de Google.
+
+### 1. Crear el proyecto en Google Cloud
+
+1. Entra en <https://console.cloud.google.com/> con la cuenta de Google que quieres conectar.
+2. En el selector de proyectos, pulsa **Nuevo proyecto**.
+3. Escribe un nombre, por ejemplo `Mi Jarvis`, y pulsa **Crear**.
+4. Selecciona ese proyecto antes de continuar.
+
+### 2. Habilitar Gmail API y Google Calendar API
+
+1. Abre **APIs y servicios → Biblioteca**.
+2. Busca **Gmail API**, ábrela y pulsa **Habilitar**.
+3. Vuelve a la biblioteca, busca **Google Calendar API**, ábrela y pulsa **Habilitar**.
+4. Sin estas dos API habilitadas, la conexión puede autorizar la cuenta pero las consultas fallarán con un error 403.
+
+### 3. Configurar la pantalla de consentimiento OAuth
+
+1. Abre **APIs y servicios → Pantalla de consentimiento de OAuth**.
+2. Elige **Externo** para una cuenta personal de Gmail, o **Interno** si es una cuenta de Google Workspace de tu organización.
+3. Rellena el nombre de la aplicación (`Mi Jarvis`), el correo de asistencia y el correo de contacto del desarrollador. Guarda.
+4. En **Permisos o alcances**, añade exactamente:
+   - `https://www.googleapis.com/auth/gmail.readonly`
+   - `https://www.googleapis.com/auth/calendar.events.readonly`
+5. **No añadas** permisos de envío, modificación, borrado ni acceso completo al calendario.
+6. Si la aplicación queda en estado **Prueba** (Testing), abre **Usuarios de prueba** y añade la cuenta de Google que vas a conectar. Sin eso, Google mostrará «Acceso bloqueado».
+7. Para uso personal no hace falta publicar la aplicación; si la publicas, Google puede pedir una revisión de los permisos. Jarvis funciona igual en modo Prueba para las cuentas de prueba.
+
+### 4. Crear la credencial OAuth de escritorio
+
+1. Abre **APIs y servicios → Credenciales**.
+2. Pulsa **Crear credenciales → ID de cliente de OAuth**.
+3. En **Tipo de aplicación** elige **Aplicación de escritorio**.
+4. Escribe un nombre, por ejemplo `Jarvis escritorio`, y pulsa **Crear**.
+5. Descarga el **JSON** con el botón de descarga.
+6. Guarda el archivo como `credentials.json` en la raíz del proyecto o en otra ruta y anótala.
+7. Comprueba que el JSON contiene un bloque `"installed"`. Si contiene `"web"`, creaste un cliente web por error: repite el paso con **Aplicación de escritorio**.
+
+> `credentials.json` está excluido en `.gitignore`. **Nunca** lo subas al repositorio: identifica a tu aplicación de Google Cloud.
+
+### 5. Configurar `.env`
+
+```dotenv
+GOOGLE_OAUTH_CLIENT_FILE=credentials.json
+GOOGLE_TIMEZONE=America/Santiago
+```
+
+- Si guardaste el JSON fuera del proyecto, usa una ruta absoluta, por ejemplo `C:\Users\tu_usuario\Documentos\credentials.json`.
+- `GOOGLE_TIMEZONE` acepta cualquier zona IANA. Si el valor no es válido, Jarvis usa `America/Santiago` y muestra un aviso.
+- Reinicia Jarvis después de guardar `.env`.
+
+### 6. Conectar la cuenta
+
+1. Abre Jarvis y busca **GOOGLE CONNECT**.
+2. Pulsa **CONECTAR GOOGLE** (o di «conecta Google»).
+3. Se abrirá tu **navegador predeterminado** con la página de autorización de Google.
+4. Elige la cuenta que añadiste como usuario de prueba.
+5. Si aparece «Google no ha verificado esta aplicación», entra en **Configuración avanzada** y continúa con tu propia aplicación. Es normal mientras está en modo Prueba.
+6. Revisa que los permisos sean **solo lectura de Gmail** y **solo lectura de eventos de Calendar** y acepta.
+7. Cuando el navegador muestre «Autorización completada», cierra esa pestaña y vuelve a Jarvis.
+8. Jarvis verifica el acceso con el perfil de Gmail y una consulta mínima de un día al calendario, **sin descargar correos ni eventos**.
+9. La tarjeta mostrará **CONECTADO** con la cuenta autorizada. Prueba **Consultar correos** y **Consultar agenda**.
+
+### 7. Token, desconexión y revocación
+
+- El token se guarda cifrado con **DPAPI** en `%LOCALAPPDATA%\MiJarvis\google_token_cache.bin`, ligado a tu usuario de Windows. Si DPAPI no está disponible, la sesión vive **solo en memoria**.
+- En aplicaciones con estado **Prueba**, Google puede hacer caducar el token de actualización a los 7 días. Si ocurre, vuelve a pulsar **CONECTAR GOOGLE**.
+- Pulsa **Desconectar** o di «desconecta Google». Jarvis borra **su** token y el contexto, pero **no cierra la sesión de tu cuenta en el navegador**.
+- Para retirar el consentimiento de la aplicación, entra en <https://myaccount.google.com/permissions>, selecciona la aplicación y pulsa **Quitar acceso**.
+- Para empezar de cero, desconecta en Jarvis y borra `%LOCALAPPDATA%\MiJarvis\google_token_cache.bin`.
+
+### 8. Solución de problemas de permisos
+
+| Síntoma | Causa probable | Solución |
+|---|---|---|
+| «Google no está configurado» | Falta `credentials.json` o la ruta de `GOOGLE_OAUTH_CLIENT_FILE` no existe | Descarga el JSON de la aplicación de escritorio y revisa la ruta en `.env`. |
+| «El archivo de credenciales no corresponde a una aplicación de escritorio» | Se creó un cliente OAuth de tipo web | Crea un cliente **Aplicación de escritorio** y descarga su JSON. |
+| «Google bloqueó el acceso de la aplicación» | La app está en Prueba y la cuenta no es usuario de prueba, o Workspace lo impide | Añade la cuenta en **Usuarios de prueba** o pide aprobación al administrador. |
+| «No se concedieron los permisos de Google» | Rechazaste el consentimiento | Repite la conexión y acepta los dos permisos de lectura. |
+| Error 403 | Alguna API está deshabilitada o faltan permisos | Habilita **Gmail API** y **Google Calendar API** y vuelve a conectar. |
+| «La sesión de Google venció» | Token caducado, revocado o contraseña cambiada | Pulsa **CONECTAR GOOGLE** otra vez. |
+| Error 429 | Límite temporal de las API de Google | Jarvis respeta `Retry-After` y reintenta de forma acotada; espera unos segundos. |
+| «No se pudo conectar con Google» | Sin Internet, proxy o firewall | El resto de Jarvis sigue funcionando; recupera la conexión y reintenta. |
+| El navegador no se abre | Navegador predeterminado mal configurado | Configura un navegador predeterminado y vuelve a pulsar **CONECTAR GOOGLE**; el flujo local no usa un código manual. |
+
+Enlaces oficiales:
+
+- Consola de Google Cloud: <https://console.cloud.google.com/>
+- Gmail API: <https://developers.google.com/gmail/api>
+- Google Calendar API: <https://developers.google.com/calendar/api>
+- OAuth 2.0 para aplicaciones de escritorio: <https://developers.google.com/identity/protocols/oauth2/native-app>
+- Permisos de Gmail: <https://developers.google.com/gmail/api/auth/scopes>
+- Permisos de Calendar: <https://developers.google.com/calendar/api/auth>
+- Guía rápida de Gmail en Python: <https://developers.google.com/gmail/api/quickstart/python>
+- Guía rápida de Calendar en Python: <https://developers.google.com/calendar/api/quickstart/python>
+- Revocar acceso: <https://myaccount.google.com/permissions>
+
 ## Privacidad: qué datos salen del equipo
 
 Jarvis pide permiso **por proveedor y por finalidad**. Los permisos se conceden en el primer arranque y se pueden retirar en **Ajustes**.
@@ -573,16 +752,21 @@ Jarvis pide permiso **por proveedor y por finalidad**. Los permisos se conceden 
    - Los cálculos se hacen en tu equipo; Gemini solo interpreta la pregunta o redacta la explicación sobre resultados ya calculados.
 5. **Google Gemini — conversación**
    - Se envían tu mensaje y un **historial breve y acotado** de la charla.
-6. **Aviso del nivel gratuito**
-   - Google puede usar el contenido enviado para mejorar sus productos en el nivel gratuito. No uses documentos ni libros laborales confidenciales con esta configuración.
+6. **Google — Gmail, Calendar y voz**
+   - La consulta del buzón y de la agenda va **directamente a las API de Google** con un token OAuth; Gemini no participa en esa consulta.
+   - Si pides un resumen, se envía a Google Gemini **solo el correo seleccionado** o **los eventos de la agenda consultada**, nunca el buzón o el calendario completos, y solo con el permiso **Google**.
+   - Si la respuesta se lee en voz alta, el texto se transmite a ElevenLabs como cualquier otra respuesta. Jarvis lo avisa al activar la voz.
+   - No se guardan correos, cuerpos, eventos ni tokens en texto plano. El token usa el cifrado de Windows (DPAPI) o queda solo en memoria.
+7. **Aviso del nivel gratuito**
+   - Google puede usar el contenido enviado para mejorar sus productos en el nivel gratuito. No uses documentos, libros, correos ni agendas confidenciales con esta configuración.
 
 Además:
 
 - Las claves viven en `.env`, nunca en el código ni en los registros.
-- `logs/jarvis.log` guarda eventos técnicos (estado, tipo de error, nombre del recurso y número de fragmentos), **nunca** claves, contenido del documento o del libro ni transcripciones.
+- `logs/jarvis.log` guarda eventos técnicos (estado, tipo de error, nombre del recurso y número de fragmentos), **nunca** claves, tokens de Google, contenido del documento o del libro, correos, eventos ni transcripciones.
 - El historial de conversación vive solo en memoria; no se guarda entre sesiones.
-- Al cerrar, se cierran los flujos de audio y se detiene cualquier reproducción.
-- Jarvis no ejecuta comandos, no envía correos, no modifica archivos y no activa facturación ni planes de pago.
+- Al cerrar, se cierran los flujos de audio, se detiene cualquier reproducción y se liberan los asistentes de Google.
+- Jarvis no ejecuta comandos, **no envía, borra ni modifica correos**, no crea ni cambia eventos, no modifica archivos y no activa facturación ni planes de pago.
 
 ## Cómo funciona por dentro
 
@@ -598,7 +782,8 @@ La interfaz es delgada y **no llama a proveedores**. Todo pasa por un controlado
 8. **`jarvis/documents/downloads.py`** busca y abre `.docx`, `.xlsx` y `.xlsm` en la carpeta real de Descargas con coincidencia difusa y ambigüedad explícita.
 9. **`jarvis/documents/`** extrae párrafos, tablas y secciones; fragmenta; recupera contexto local; el asistente construye el prompt con fuentes.
 10. **`jarvis/spreadsheets/`** carga libros con `openpyxl` en dos pasadas (fórmulas y valores), detecta encabezados y tablas, ejecuta consultas y diagnósticos permitidos en Python y deja a Gemini solo la interpretación y la redacción.
-11. **`jarvis/ui/`** dibuja el orbe, los visualizadores, la conversación, las tarjetas de Word/Excel y los controles; guarda solo preferencias.
+11. **`jarvis/integrations/`** implementa Gmail y Google Calendar con OAuth 2.0 de escritorio, caché cifrada con DPAPI, un cliente de solo lectura con reintentos y paginación, y los servicios de correo y calendario con formato en español. El controlador decide cuándo consultar; la UI solo muestra el estado.
+12. **`jarvis/ui/`** dibuja el orbe, los visualizadores, la conversación, las tarjetas de Word/Excel, la sección GOOGLE CONNECT y los controles; guarda solo preferencias.
 
 Los errores de los SDK se traducen a mensajes en español (`ProviderRateLimitError`, `ProviderNetworkError`, `ProviderAuthError`, `ProviderModelError`, `DocumentError`, `AudioError`…). La ventana nunca muestra una traza técnica.
 
@@ -622,30 +807,33 @@ La suite:
 - Bloquea conexiones de red externas; los proveedores se sustituyen por dobles locales.
 - Cubre estados y transiciones, saludo, turnos de voz y texto, micrófono ausente o roto, pausa/reanudación, detención de voz, supresión de eco, duplicados, apertura de Descargas, ambigüedad y resolución por número, preguntas sobre el documento, historial acotado, consentimiento denegado, prueba de micrófono, cambio de dispositivo, cierre ordenado y ausencia de secretos en los registros.
 - Incluye pruebas de **humo de la ventana** con `QT_QPA_PLATFORM=offscreen`: construcción sin claves, actualización de estado y mensajes, tarjetas de Word/Excel, panel de análisis, cierre limpio y persistencia de consentimiento/preferencias.
+- Cubre **Gmail y Google Calendar** con respuestas simuladas: OAuth 2.0 de escritorio con PKCE, caché cifrada con DPAPI, validación de `credentials.json`, cliente de solo lectura sin métodos de escritura, paginación, Gmail (lista, no leídos, multipart, HTML a texto, Base64 URL-safe, detalle solo del correo elegido y sin adjuntos), Calendar (hoy, mañana, semana laboral, próximos siete días, día concreto, eventos de día completo y zona `America/Santiago`), errores 401/403/429/red, consentimiento, seguimientos y separación de contextos.
 - Las pruebas marcadas `integration` están **excluidas por defecto** (`pytest.ini`).
 
 ### Resultado de la última ejecución
 
 | Prueba | Comando | Resultado |
 |---|---|---|
-| Suite local completa | `& .\.venv\Scripts\python.exe -m pytest -q` | **341 pasadas**, 4 deseleccionadas |
+| Suite local completa | `& .\.venv\Scripts\python.exe -m pytest -q` | **460 pasadas**, 4 deseleccionadas |
 
 ## Qué está verificado y qué no
 
 Verificado en este equipo:
 
-- **Suite local:** 341 pruebas pasadas, 4 deseleccionadas.
-- **Ventana PySide6:** construcción, señales, tarjetas de Word/Excel, panel de análisis, cierre y persistencia con plataforma `offscreen`.
+- **Suite local:** 460 pruebas pasadas, 4 deseleccionadas.
+- **Ventana PySide6:** construcción, señales, tarjetas de Word/Excel, sección GOOGLE CONNECT, panel de análisis, cierre y persistencia con plataforma `offscreen`.
 - **Excel:** carga de `.xlsx` temporales con encabezado en la fila 3, tabla, fórmulas y hoja oculta; consultas, filtros, agrupaciones, fechas, calidad y lectura de valores cacheados, todo en local con `openpyxl`.
+- **Gmail y Google Calendar:** OAuth 2.0 con PKCE, caché cifrada con DPAPI, validación de credenciales, cliente de solo lectura, paginación, correo y calendario con **respuestas simuladas de las API de Google**, errores y contextos. No se ha ejecutado ninguna llamada real a las API de Google en las pruebas.
 - **Captura real de micrófono:** MME a 16 kHz y WASAPI a 48 kHz con remuestreo a 16 kHz. `python main.py --check` detecta el micrófono.
 - **Carpeta real de Descargas:** resuelta mediante `SHGetKnownFolderPath` como `C:\Users\sgall\Downloads`.
 - **Gemini real:** llamadas y asistente documental con un `.docx` temporal.
 - **ElevenLabs TTS real:** síntesis PCM a 16 kHz con voz premade.
 - **ElevenLabs STT por lotes real:** ida y vuelta síntesis → WAV → `scribe_v2`, con la frase reconocida en español.
-- **Proveedores y SDK:** `elevenlabs` 2.74.1, `google-genai` 2.33.0, `openpyxl` 3.1.5, `PySide6-Essentials` 6.12.0, Python 3.12.2.
+- **Proveedores y SDK:** `elevenlabs` 2.74.1, `google-genai` 2.33.0, `openpyxl` 3.1.5, `PySide6-Essentials` 6.12.0, `google-api-python-client` 2.202.0, `google-auth` 2.62.0, `google-auth-httplib2` 0.4.4, `google-auth-oauthlib` 1.5.0, `tzdata` 2026.6, Python 3.12.2.
 
 No verificado todavía de extremo a extremo en hardware real:
 
+- **Conexión real con Google.** La integración está implementada y probada con respuestas simuladas, pero **no se ha autenticado una cuenta real** en este equipo: falta crear la aplicación de escritorio en Google Cloud, colocar `credentials.json` y autorizar la cuenta en el navegador. No se afirma que Gmail ni Calendar funcionen sin esa prueba.
 - **Sesión continua de Scribe Realtime v2 en vivo.** La ruta está implementada y probada con dobles; si falla, el respaldo por lotes está probado. El indicador `STT` muestra el modo efectivo.
 - **Reproducción por altavoces del flujo TTS.** La síntesis real está verificada; la salida física se cubre con pruebas simuladas.
 - **Flujo completo voz → abrir documento → pregunta → respuesta hablada** en una sola sesión con micrófono y altavoces físicos. Cada componente está probado por separado.
@@ -685,6 +873,15 @@ No verificado todavía de extremo a extremo en hardware real:
 | `Hay varias hojas… ¿Cuál quieres consultar?` | La pregunta no indica hoja y hay varias con datos | Nombra la hoja: «en la hoja Tareas». |
 | `El archivo no es un libro .xlsx válido` | Archivo dañado, protegido o renombrado | Ábrelo en Excel, comprueba que no esté dañado y guárdalo de nuevo como `.xlsx`. |
 | `No se pudo leer ese documento` | `.docx` corrupto o abierto en Word | Ciérralo y vuelve a intentarlo. |
+| `Google no está configurado` | Falta `credentials.json` o la ruta de `GOOGLE_OAUTH_CLIENT_FILE` no existe | Descarga el JSON de la aplicación de escritorio y revisa la ruta en `.env`; consulta la guía de Google. |
+| `Google no está conectado` | Aún no autorizaste la cuenta | Pulsa **CONECTAR GOOGLE** y completa la autorización en el navegador. |
+| `No se concedieron los permisos de Google` | Rechazaste el consentimiento | Repite la conexión y acepta `gmail.readonly` y `calendar.events.readonly`. |
+| `Google bloqueó el acceso de la aplicación` | La app está en Prueba y la cuenta no es usuario de prueba, o una política de Workspace lo impide | Añade la cuenta en **Usuarios de prueba** o pide aprobación al administrador. |
+| `La sesión de Google venció` | Token caducado (en modo Prueba puede durar 7 días), revocado o contraseña cambiada | Vuelve a conectar la cuenta con **CONECTAR GOOGLE**. |
+| `Google rechazó la consulta (error 403)` | Permisos insuficientes, revocados o API deshabilitada | Habilita **Gmail API** y **Google Calendar API** y revisa los dos permisos concedidos. |
+| `Google limitó temporalmente las solicitudes (error 429)` | Límite temporal de las API | Jarvis respeta `Retry-After` y reintenta de forma acotada; espera unos segundos. |
+| «No hay correos disponibles» / «No hay eventos» | Bandeja o agenda vacías en ese período | Es un resultado válido; prueba otro período o revisa Gmail o Google Calendar. |
+| `No se pudo conectar con Google` | Sin Internet, proxy o firewall | Recupera la conexión; Word, Excel, voz y el resto de funciones siguen disponibles. |
 | Acentos raros en la consola | Código de página de Windows | Usa Windows Terminal o `chcp 65001`; Jarvis reconfigura la salida a UTF-8. |
 | `pip` falla con rutas largas | Límite MAX_PATH + OneDrive | Crea el venv en una ruta corta (ver instalación). |
 | La voz no se oye pero la transcripción funciona | Falta `ELEVENLABS_VOICE_ID`, permiso de voz o plan | Configura la voz, acepta el permiso de voz o revisa el plan. |
@@ -696,7 +893,10 @@ No verificado todavía de extremo a extremo en hardware real:
 - No ofrece **paginación fiable**: las referencias son por encabezado, párrafo y tabla.
 - **No hay palabra de activación.** La escucha es continua solo mientras está activa y autorizada; puedes pausarla o cerrarla explícitamente.
 - Solo abre archivos **`.docx`, `.xlsx` y `.xlsm`** de Descargas; no controla el sistema operativo, no ejecuta comandos y no modifica archivos.
-- No se conecta a **correo, Outlook, Google Calendar ni WhatsApp**.
+- **Gmail y Google Calendar:** solo lectura. No envía, responde, reenvía, marca, mueve ni borra correos; no descarga adjuntos; no crea, modifica, cancela ni acepta eventos.
+- **Gmail y Google Calendar:** solo se consultan la bandeja de entrada (20 correos recientes), el calendario `primary` y los detalles del correo elegido. No hay búsqueda global, calendarios compartidos, buzones delegados ni sincronización continua.
+- **Gmail y Google Calendar:** requieren crear una aplicación propia de escritorio en Google Cloud y autorizar la cuenta en el navegador. Si la app está en modo Prueba, solo funcionan las cuentas añadidas como usuarios de prueba y el token puede caducar a los 7 días; la publicación puede exigir una revisión de Google.
+- **Gmail y Google Calendar:** la ventana muestra los eventos en `GOOGLE_TIMEZONE`; no convierte automáticamente a otra zona si viajas.
 - **Excel:** solo se admiten `.xlsx`/`.xlsm`; los `.xls`/`.xlsb` requieren guardarse como `.xlsx`.
 - **Excel:** no recalcula fórmulas ni ejecuta macros. Si el archivo no trae resultados cacheados, solo puede explicar la fórmula.
 - **Excel:** las hojas ocultas se listan pero no se mezclan automáticamente; los libros que superan los límites se analizan de forma **parcial** y se avisa de ello.
@@ -755,20 +955,34 @@ Jarvis/
 │  │  ├─ base.py                   # Interfaz LLMProvider
 │  │  ├─ gemini_provider.py        # google-genai
 │  │  └─ elevenlabs_provider.py    # STT y TTS oficiales
+│  ├─ integrations/
+│  │  ├─ __init__.py               # Permisos, zona y URL oficiales de Google
+│  │  ├─ google_auth.py            # OAuth 2.0 con PKCE, DPAPI y caché cifrada
+│  │  ├─ google_client.py          # Cliente GET de solo lectura y reintentos
+│  │  ├─ google_mail.py            # Gmail, multipart, HTML a texto y no leídos
+│  │  ├─ google_calendar.py        # events.list, zonas horarias y períodos
+│  │  ├─ google_format.py          # Formato de fechas, horas y etiquetas
+│  │  └─ google_session.py         # Conexión, verificación y servicios de Google
 │  └─ ui/
 │     ├─ gui.py                    # Ventana, diálogos y preferencias
 │     ├─ bridge.py                 # Callbacks del controlador → señales Qt
 │     ├─ theme.py                  # Paleta y hoja de estilos
-│     ├─ widgets.py                # Orbe, barras, paneles y tarjetas
+│     ├─ widgets.py                # Orbe, barras, paneles, tarjetas y Google
 │     └─ console.py                # Consola clásica (--console)
 ├─ tests/
 │  ├─ test_controller.py           # Turnos, micrófono, documentos, Excel y cierre
-│  ├─ test_gui.py                  # Humo de la ventana, tarjetas y preferencias
+│  ├─ test_gui.py                  # Humo de la ventana, paneles y preferencias
 │  ├─ test_spreadsheets.py         # Carga, consultas, fórmulas, calidad y contexto
+│  ├─ test_google_auth.py          # OAuth, PKCE, DPAPI y caché cifrada
+│  ├─ test_google_client.py        # Cliente de solo lectura, reintentos y paginación
+│  ├─ test_google_mail.py          # Gmail, multipart, HTML y correo elegido
+│  ├─ test_google_calendar.py      # Agenda, períodos y zona horaria
+│  ├─ test_google_controller.py    # Comandos, contextos y conexión simulada
+│  ├─ google_helpers.py            # Dobles de Gmail y Calendar compartidos
 │  ├─ spreadsheet_helpers.py       # Libros .xlsx temporales compartidos
 │  └─ ...                          # Audio, voz, documentos, proveedores, estados
 ├─ .env.example                    # Variables vacías documentadas
-├─ .gitignore                      # Protege .env, .venv, logs y temporales
+├─ .gitignore                      # Protege .env, credentials.json, tokens y temporales
 ├─ requirements.txt
 ├─ pytest.ini
 └─ README.md
@@ -776,25 +990,26 @@ Jarvis/
 
 ## Hoja de ruta
 
-La primera versión implementa la **capacidad documental**, el **análisis de Excel en solo lectura** y la **conversación por voz**. La arquitectura permite añadir los cuatro roles previstos sin reescribir lo existente. Esos cuatro roles **siguen sin estar conectados** a cuentas, calendarios ni correos; el análisis de Excel ya está disponible.
+La primera versión implementa la **capacidad documental**, el **análisis de Excel en solo lectura**, la **conversación por voz** y la **consulta de correo de Gmail y agenda de Google Calendar en solo lectura**. La arquitectura permite añadir los roles previstos sin reescribir lo existente.
 
-| Rol | Qué hará | Piezas que ya existen |
+| Rol | Estado | Piezas que ya existen |
 |---|---|---|
-| Asistente de Correo | Clasificar comunicaciones e identificar compromisos | `Controller`, `DocumentAssistant` como patrón, `ConsentManager` |
-| Asistente de Agenda | Reuniones, fechas y vencimientos | Extracción de fechas/plazos, referencias a fuentes |
-| Asistente de Tareas | Registros, estados y prioridades | Extracción de acciones y responsabilidades |
-| Asistente de Reportes | Resúmenes e indicadores | Resumen map-reduce, salida con fuentes |
+| Asistente de Correo | **Solo lectura implementada** (bandeja, conteo y lectura del correo elegido) | `Controller`, `integrations/google_mail.py`, `ConsentManager` |
+| Asistente de Agenda | **Solo lectura implementada** (hoy, mañana, semana laboral y próximos siete días) | `integrations/google_calendar.py`, `zoneinfo`, referencias de período |
+| Asistente de Tareas | Pendiente | Extracción de acciones y responsabilidades |
+| Asistente de Reportes | Pendiente | Resumen map-reduce, salida con fuentes |
 
 Evolución prevista:
 
 1. Añadir nuevos asistentes con la misma interfaz de respuesta (`AssistantAnswer`).
 2. Ampliar **Excel**: la lectura y el análisis local ya están; una futura escritura controlada exigirá confirmación explícita.
-3. Añadir un **dashboard** que reutilice el controlador y los asistentes.
-4. Mantener un único punto de consentimiento y registro para cada proveedor externo.
-5. Verificar en hardware real la sesión continua de Scribe Realtime v2 y la reproducción por altavoces.
+3. Ampliar **Gmail y Google Calendar** solo si se mantiene el principio de mínimo privilegio: cualquier escritura exigirá permisos nuevos, confirmación explícita y una revisión de seguridad.
+4. Añadir un **dashboard** que reutilice el controlador y los asistentes.
+5. Mantener un único punto de consentimiento y registro para cada proveedor externo.
+6. Verificar en hardware real la conexión con una cuenta de Google, la sesión continua de Scribe Realtime v2 y la reproducción por altavoces.
 
 Los asistentes futuros deberán pedir **confirmación explícita** antes de cualquier acción que modifique información (enviar, crear o borrar). Esta versión solo realiza consultas y aperturas locales autorizadas.
 
 ---
 
-**Mi Jarvis 0.1.0** — asistente de escritorio con voz, Word, Excel y Descargas. Hecho para crecer semana a semana.
+**Mi Jarvis 0.1.0** — asistente de escritorio con voz, Word, Excel, Descargas, Gmail y Google Calendar de solo lectura. Hecho para crecer semana a semana.

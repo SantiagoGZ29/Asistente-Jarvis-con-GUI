@@ -54,6 +54,24 @@ GEMINI_CHAT_CONSENT = (
     "  - Jarvis no habilita facturación ni planes de pago automáticamente."
 )
 
+GEMINI_GOOGLE_CONSENT = (
+    "Para resumir o interpretar un correo de Gmail o tu agenda de Google "
+    "Calendar, Jarvis enviará a Google Gemini (servicio externo de IA) "
+    "únicamente el contenido que hayas seleccionado.\n"
+    "  - Qué se envía: el correo activo (remitente, asunto, fecha y cuerpo) o "
+    "los eventos del período consultado. Nunca se envía el buzón completo ni "
+    "el calendario completo.\n"
+    "  - Qué NO se envía: los tokens de Google, tus credenciales ni las listas "
+    "completas de correos descargadas por la sesión.\n"
+    "  - A quién: Google (API de Gemini, https://ai.google.dev).\n"
+    "  - Aviso de privacidad: en el nivel gratuito, Google puede usar el "
+    "contenido enviado para mejorar sus productos. Evita resumir correos "
+    "confidenciales con esta configuración.\n"
+    "  - Puedes rechazarlo: Jarvis seguirá mostrando y leyendo el correo de "
+    "forma local, sin resumen externo.\n"
+    "  - Jarvis no habilita facturación ni planes de pago automáticamente."
+)
+
 ELEVENLABS_STT_CONSENT = (
     "Para transcribir tu voz, Jarvis enviará audio del micrófono a ElevenLabs "
     "(servicio externo de voz).\n"
@@ -105,6 +123,13 @@ GEMINI_SPREADSHEET = ConsentRequest(
     description=GEMINI_SPREADSHEET_CONSENT,
 )
 
+GEMINI_GOOGLE = ConsentRequest(
+    key="gemini_google",
+    provider="Google Gemini",
+    purpose="resumir el correo o la agenda seleccionados",
+    description=GEMINI_GOOGLE_CONSENT,
+)
+
 ELEVENLABS_STT = ConsentRequest(
     key="elevenlabs_stt",
     provider="ElevenLabs",
@@ -125,6 +150,7 @@ ALL_REQUESTS: dict[str, ConsentRequest] = {
         GEMINI_DOCUMENT,
         GEMINI_CHAT,
         GEMINI_SPREADSHEET,
+        GEMINI_GOOGLE,
         ELEVENLABS_STT,
         ELEVENLABS_TTS,
     )

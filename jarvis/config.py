@@ -8,6 +8,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from jarvis.integrations import (
+    DEFAULT_GOOGLE_OAUTH_CLIENT_FILE,
+    DEFAULT_GOOGLE_TIMEZONE,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
 
@@ -118,6 +123,21 @@ def _as_choice(
     return raw
 
 
+def _google_timezone(*, warnings: list[str]) -> str:
+    value = _as_str("GOOGLE_TIMEZONE", DEFAULT_GOOGLE_TIMEZONE)
+    try:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(value)
+    except Exception:
+        warnings.append(
+            f"GOOGLE_TIMEZONE no es una zona horaria válida ('{value}'). "
+            f"Se usará {DEFAULT_GOOGLE_TIMEZONE}."
+        )
+        return DEFAULT_GOOGLE_TIMEZONE
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     """Configuración inmutable de una sesión de Jarvis."""
@@ -165,6 +185,10 @@ class Settings:
     spreadsheet_header_scan_rows: int = 12
     spreadsheet_timeout_s: float = 20.0
 
+    # Gmail y Google Calendar (solo lectura) mediante las API de Google
+    google_oauth_client_file: str = DEFAULT_GOOGLE_OAUTH_CLIENT_FILE
+    google_timezone: str = DEFAULT_GOOGLE_TIMEZONE
+
     env_file: Path | None = field(default=DEFAULT_ENV_FILE)
     warnings: tuple[str, ...] = field(default=())
 
@@ -188,6 +212,17 @@ class Settings:
     @property
     def voice_ready(self) -> bool:
         return self.elevenlabs_configured
+
+    @property
+    def google_client_path(self) -> Path:
+        """Ruta resuelta del archivo credentials.json de Google Cloud."""
+        value = Path(self.google_oauth_client_file)
+        return value if value.is_absolute() else PROJECT_ROOT / value
+
+    @property
+    def google_configured(self) -> bool:
+        """Hay un archivo de credenciales de Google para intentar la conexión."""
+        return self.google_client_path.is_file()
 
     @property
     def realtime_stt_enabled(self) -> bool:
@@ -214,6 +249,11 @@ class Settings:
             "Escucha automática": "sí" if self.auto_listen else "no",
             "Micrófono guardado": self.input_device_key or "predeterminado",
             "Fin de turno por silencio": f"{self.silence_ms} ms",
+            "Google": (
+                "configurado" if self.google_configured else "no configurado"
+            ),
+            "Zona horaria de Google": self.google_timezone,
+            "Archivo de credenciales de Google": str(self.google_client_path),
         }
 
     def validation_issues(self) -> list[str]:
@@ -238,6 +278,16 @@ class Settings:
             issues.append(
                 "JARVIS_MIN_SPEECH_MS es demasiado alto respecto a "
                 "JARVIS_SILENCE_MS: las frases cortas podrían descartarse."
+            )
+        if (
+            self.google_oauth_client_file
+            and self.google_oauth_client_file != DEFAULT_GOOGLE_OAUTH_CLIENT_FILE
+            and not self.google_configured
+        ):
+            issues.append(
+                "Google quedará desactivado: no se encontró el archivo "
+                f"«{self.google_client_path}». Descarga credentials.json desde "
+                "Google Cloud o ajusta GOOGLE_OAUTH_CLIENT_FILE."
             )
         return issues
 
@@ -422,6 +472,10 @@ def load_settings(
             maximum=120.0,
             warnings=warnings,
         ),
+        google_oauth_client_file=_as_str(
+            "GOOGLE_OAUTH_CLIENT_FILE", DEFAULT_GOOGLE_OAUTH_CLIENT_FILE
+        ),
+        google_timezone=_google_timezone(warnings=warnings),
         log_level=log_level,
         env_file=env_path,
         warnings=tuple(warnings),

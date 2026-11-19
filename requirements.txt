@@ -8,6 +8,14 @@ openpyxl>=3.1.5
 sounddevice>=0.5.0
 python-dotenv>=1.0.1
 
+# Gmail y Google Calendar (solo lectura, OAuth 2.0 de escritorio).
+google-api-python-client>=2.100
+google-auth>=2.20
+google-auth-httplib2>=0.1.0
+google-auth-oauthlib>=1.0
+# Base de zonas horarias IANA para Windows (America/Santiago).
+tzdata>=2024.1
+
 # Interfaz grafica. Se instala solo Essentials (QtCore/QtGui/QtWidgets) en
 # lugar del meta-paquete PySide6, que arrastra WebEngine y PDF (~175 MB)
 # sin usarse en este proyecto.

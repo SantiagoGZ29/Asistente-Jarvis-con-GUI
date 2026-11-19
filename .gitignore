@@ -3,6 +3,15 @@
 .env.*
 !.env.example
 
+# Credenciales de Google y tokens de sesión
+credentials.json
+client_secrets.json
+token.json
+*.token
+google_token_cache.bin
+google_token_cache.bin.tmp
+.secrets/
+
 # Entornos virtuales
 .venv/
 venv/

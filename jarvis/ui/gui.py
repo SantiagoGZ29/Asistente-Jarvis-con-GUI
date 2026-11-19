@@ -13,8 +13,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from PySide6.QtCore import QSettings, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QKeySequence, QShortcut
+from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -44,11 +44,17 @@ from jarvis.core.consent import (
     ELEVENLABS_TTS,
     GEMINI_CHAT,
     GEMINI_DOCUMENT,
+    GEMINI_GOOGLE,
     GEMINI_SPREADSHEET,
     ConsentManager,
     ConsentRequest,
 )
-from jarvis.core.controller import ChatMessage, Controller, DocumentInfo
+from jarvis.core.controller import (
+    ChatMessage,
+    Controller,
+    DocumentInfo,
+    GoogleInfo,
+)
 from jarvis.core.logging_setup import get_logger
 from jarvis.core.states import (
     STATE_HINTS,
@@ -57,6 +63,7 @@ from jarvis.core.states import (
     MicState,
 )
 from jarvis.documents.downloads import windows_downloads_folder
+from jarvis.integrations import GMAIL_URL, GOOGLE_CALENDAR_URL
 from jarvis.ui import theme
 from jarvis.ui.bridge import ControllerBridge
 from jarvis.ui.widgets import (
@@ -65,6 +72,7 @@ from jarvis.ui.widgets import (
     ConversationBubble,
     DocumentCard,
     OrbWidget,
+    GooglePanel,
     SpreadsheetCard,
     VoicePanel,
 )
@@ -81,6 +89,10 @@ _CONSENT_ROWS: tuple[tuple[ConsentRequest, str], ...] = (
     (
         GEMINI_SPREADSHEET,
         "Excel: interpretar preguntas y redactar respuestas con Google Gemini",
+    ),
+    (
+        GEMINI_GOOGLE,
+        "Google: resumir el correo o la agenda seleccionados con Google Gemini",
     ),
     (GEMINI_CHAT, "Conversación: enviar mis mensajes a Google Gemini"),
 )
@@ -391,12 +403,26 @@ class HelpDialog(QDialog):
             "  •  «Agrupa las tareas por área»\n"
             "  •  «Explícame la fórmula de la columna Estado»\n"
             "  •  «Revisa la calidad de los datos de la hoja Tareas»\n"
+            "  •  «Revisa mis correos» / «¿Cuántos correos sin leer tengo?»\n"
+            "  •  «Lee el último correo» / «Busca el correo de Ana»\n"
+            "  •  «¿Qué tengo hoy?» / «¿Cuál es mi próxima reunión?»\n"
+            "  •  «Conecta Google» / «Desconecta Google»\n"
             "  •  «Pausa» / «Reanuda» / «Detente» / «Cancela»\n\n"
             "Si hay varios documentos o libros parecidos, Jarvis te preguntará "
             "cuál abrir; nunca elige uno por su cuenta. Solo abre archivos "
             ".docx, .xlsx o .xlsm que estén realmente en Descargas. Los libros "
             "se leen en modo solo lectura: Jarvis no guarda, edita ni ejecuta "
             "macros.\n\n"
+            "GOOGLE\n\n"
+            "La conexión con Google usa OAuth 2.0 de escritorio con el navegador "
+            "predeterminado. Solo se solicitan permisos de lectura de Gmail y "
+            "de Google Calendar (gmail.readonly y calendar.events.readonly): "
+            "Jarvis nunca envía, borra, mueve ni modifica correos o eventos, y "
+            "no descarga adjuntos. El token se guarda cifrado con DPAPI en tu "
+            "perfil de Windows; si no es posible, la sesión vive solo en "
+            "memoria. El contenido de correos y eventos no se guarda en disco. "
+            "Al leer una respuesta en voz alta, su texto se transmite a "
+            "ElevenLabs.\n\n"
             "ATAJOS\n\n"
             "  Ctrl+M   Pausar o reanudar la escucha\n"
             "  Ctrl+.   Detener la voz de Jarvis\n"
@@ -681,6 +707,17 @@ class MainWindow(QMainWindow):
         self.analysis = AnalysisPanel()
         layout.addWidget(self.analysis)
 
+        self.google_panel = GooglePanel()
+        self.google_panel.connectRequested.connect(self._connect_google)
+        self.google_panel.disconnectRequested.connect(self._disconnect_google)
+        self.google_panel.mailRequested.connect(self._review_mail)
+        self.google_panel.calendarRequested.connect(self._review_calendar)
+        self.google_panel.openMailRequested.connect(self._open_gmail)
+        self.google_panel.openCalendarRequested.connect(
+            self._open_google_calendar
+        )
+        layout.addWidget(self.google_panel)
+
         self.spreadsheet_card = SpreadsheetCard()
         self.spreadsheet_card.pickRequested.connect(self._pick_document)
         layout.addWidget(self.spreadsheet_card)
@@ -776,6 +813,7 @@ class MainWindow(QMainWindow):
         bridge.spreadsheet.connect(self._on_spreadsheet)
         bridge.analysis.connect(self._on_analysis)
         bridge.analysisChoices.connect(self._on_analysis_choices)
+        bridge.google.connect(self._on_google)
         bridge.choices.connect(self._on_choices)
         bridge.pickRequested.connect(self._pick_document)
         bridge.exitRequested.connect(self._request_close)
@@ -1037,6 +1075,44 @@ class MainWindow(QMainWindow):
 
     def _on_analysis_choices(self, options: Iterable[str]) -> None:
         self.choices.set_choices(tuple(options or ()))
+
+    def _on_google(self, info: GoogleInfo) -> None:
+        self.google_panel.set_google(info)
+
+    def _connect_google(self) -> None:
+        if self._controller is not None:
+            self._controller.connect_google()
+
+    def _disconnect_google(self) -> None:
+        controller = self._controller
+        if controller is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Desconectar Google",
+            "Se borrará el token de Google guardado por Jarvis. Tu sesión de "
+            "Google seguirá abierta en el navegador. ¿Quieres continuar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            controller.disconnect_google()
+
+    def _review_mail(self) -> None:
+        if self._controller is not None:
+            self._controller.refresh_mail()
+
+    def _review_calendar(self) -> None:
+        if self._controller is not None:
+            self._controller.refresh_calendar()
+
+    @staticmethod
+    def _open_gmail() -> None:
+        QDesktopServices.openUrl(QUrl(GMAIL_URL))
+
+    @staticmethod
+    def _open_google_calendar() -> None:
+        QDesktopServices.openUrl(QUrl(GOOGLE_CALENDAR_URL))
 
     def _on_choices(self, names: Iterable[str]) -> None:
         self.choices.set_choices(tuple(names or ()))

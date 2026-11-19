@@ -22,9 +22,10 @@ from jarvis.core.consent import (  # noqa: E402
     ELEVENLABS_TTS,
     GEMINI_CHAT,
     GEMINI_DOCUMENT,
+    GEMINI_GOOGLE,
     GEMINI_SPREADSHEET,
 )
-from jarvis.core.controller import ChatMessage, DocumentInfo  # noqa: E402
+from jarvis.core.controller import ChatMessage, DocumentInfo, GoogleInfo  # noqa: E402
 from jarvis.core.states import AssistantState, MicState  # noqa: E402
 from jarvis.spreadsheets.models import (  # noqa: E402
     AnalysisInfo,
@@ -39,6 +40,7 @@ from jarvis.ui.gui import (  # noqa: E402
     _load_consent,
     _save_consent,
 )
+from jarvis.ui.widgets import GooglePanel  # noqa: E402
 
 ALL_FALSE = {key: False for key in ALL_REQUESTS}
 
@@ -252,6 +254,7 @@ def test_consentimiento_y_preferencias_se_guardan(
         GEMINI_DOCUMENT.key: True,
         GEMINI_CHAT.key: False,
         GEMINI_SPREADSHEET.key: True,
+        GEMINI_GOOGLE.key: False,
     }
     _save_consent(store, grants)
     assert _load_consent(store) == grants
@@ -282,3 +285,67 @@ def test_privacidad_empieza_sin_marcar_y_modo_texto_deniega_todo(
     assert dialog.text_only is True
     assert dialog.result() == QDialog.DialogCode.Accepted
     assert not any(dialog.choices().values())
+
+
+def test_panel_google_cambia_de_estado(qt_app: QApplication) -> None:
+    panel = GooglePanel()
+
+    assert panel.status.text() == "SIN CONFIGURAR"
+    assert panel.connect_button.text() == "CONECTAR GOOGLE"
+    assert panel.connect_button.isEnabled() is False
+    assert panel.mail_button.isEnabled() is False
+    assert "Gmail" in panel.mail_state.text()
+
+    panel.set_google(
+        GoogleInfo(configured=True, connected=False, problem="Revisa el .env.")
+    )
+    assert panel.status.text() == "CONFIGURADO · SIN AUTORIZAR"
+    assert panel.connect_button.isEnabled() is True
+    assert panel.mail_button.isEnabled() is False
+    assert panel.problem.isHidden() is False
+
+    panel.set_google(
+        GoogleInfo(
+            configured=True,
+            connected=True,
+            account="ana@example.com",
+            mail_count=20,
+            unread=3,
+            mail_query="Bandeja de entrada de Gmail: 20 correos",
+            calendar_count=2,
+            calendar_query="Hoy: 2 eventos",
+            next_event="«Revisión» · mar 17 nov 2026, 09:00–10:00",
+        )
+    )
+    assert panel.status.text() == "CONECTADO"
+    assert "ana@example.com" in panel.account.text()
+    assert "3 sin leer" in panel.mail_state.text()
+    assert "Hoy: 2 eventos" in panel.calendar_state.text()
+    assert "Revisión" in panel.calendar_state.text()
+    assert panel.connect_button.isEnabled() is False
+    assert panel.mail_button.isEnabled() is True
+    assert panel.problem.isHidden() is True
+
+    panel.set_google(GoogleInfo(configured=True, connected=False, busy=True))
+    assert panel.status.text() == "CONECTANDO…"
+    assert panel.connect_button.text() == "CONECTANDO…"
+    assert panel.connect_button.isEnabled() is False
+
+
+def test_ventana_actualiza_el_panel_google(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    window, _store = make_window(qt_app, tmp_path)
+    window.show()
+    assert window.controller.wait_for_idle(3.0)
+    pump(qt_app)
+
+    window.bridge.google.emit(
+        GoogleInfo(configured=True, connected=True, account="ana@example.com")
+    )
+    pump(qt_app)
+
+    assert window.google_panel.status.text() == "CONECTADO"
+    assert "ana@example.com" in window.google_panel.account.text()
+
+    window.close()

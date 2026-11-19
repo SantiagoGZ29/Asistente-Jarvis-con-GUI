@@ -45,6 +45,8 @@ _ENV_VARIABLES = (
     "JARVIS_SPREADSHEET_MAX_CONTEXT_CHARS",
     "JARVIS_SPREADSHEET_HEADER_SCAN_ROWS",
     "JARVIS_SPREADSHEET_TIMEOUT_S",
+    "GOOGLE_OAUTH_CLIENT_FILE",
+    "GOOGLE_TIMEZONE",
 )
 
 
@@ -74,6 +76,8 @@ def test_valores_por_defecto(monkeypatch) -> None:
     assert settings.gemini_configured is False
     assert settings.elevenlabs_configured is False
     assert settings.elevenlabs_tts_configured is False
+    assert settings.google_oauth_client_file == "credentials.json"
+    assert settings.google_timezone == "America/Santiago"
 
 
     assert settings.spreadsheet_max_file_mb == 25.0
@@ -205,6 +209,54 @@ def test_los_avisos_no_revelan_claves() -> None:
 
     assert "secreto" not in description
     assert "configurada" in description
+
+
+def test_configuracion_de_google_y_credenciales(monkeypatch, tmp_path) -> None:
+    _clear_environment(monkeypatch)
+    client_file = tmp_path / "credentials.json"
+    client_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_FILE", str(client_file))
+    monkeypatch.setenv("GOOGLE_TIMEZONE", "Europe/Madrid")
+
+    settings = load_settings(load_env=False)
+
+    assert settings.google_oauth_client_file == str(client_file)
+    assert settings.google_client_path == client_file
+    assert settings.google_configured is True
+    assert settings.google_timezone == "Europe/Madrid"
+    assert not any("Google" in issue for issue in settings.validation_issues())
+
+
+def test_google_avisa_si_falta_el_archivo_configurado(monkeypatch, tmp_path) -> None:
+    _clear_environment(monkeypatch)
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_CLIENT_FILE", str(tmp_path / "no-existe.json")
+    )
+
+    settings = load_settings(load_env=False)
+
+    assert settings.google_configured is False
+    issues = " ".join(settings.validation_issues())
+    assert "Google quedará desactivado" in issues
+    assert "credentials.json" in issues
+
+
+def test_google_por_defecto_no_genera_aviso(monkeypatch) -> None:
+    _clear_environment(monkeypatch)
+    settings = load_settings(load_env=False)
+
+    assert settings.google_configured is False
+    assert not any("Google" in issue for issue in settings.validation_issues())
+
+
+def test_zona_horaria_de_google_invalida_genera_aviso(monkeypatch) -> None:
+    _clear_environment(monkeypatch)
+    monkeypatch.setenv("GOOGLE_TIMEZONE", "Marte/Olympus")
+
+    settings = load_settings(load_env=False)
+
+    assert settings.google_timezone == "America/Santiago"
+    assert any("GOOGLE_TIMEZONE" in warning for warning in settings.warnings)
 
 
 def test_env_example_documenta_las_variables() -> None:

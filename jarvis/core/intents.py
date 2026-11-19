@@ -32,6 +32,16 @@ EXTRACT_RESPONSIBILITIES = "extraer_responsabilidades"
 EXTRACT_CONCLUSIONS = "extraer_conclusiones"
 QUESTION = "pregunta"
 
+# Google: Gmail y Google Calendar (solo lectura)
+MAIL_REVIEW = "correos_revisar"
+MAIL_COUNT = "correos_contar"
+MAIL_READ = "correos_leer"
+MAIL_FOLLOWUP = "correos_seguimiento"
+CALENDAR_AGENDA = "agenda_consultar"
+CALENDAR_NEXT = "agenda_proxima"
+CALENDAR_FOLLOWUP = "agenda_seguimiento"
+GOOGLE_STATUS = "google_estado"
+
 ORDINALS = {
     "primer": 1,
     "primero": 1,
@@ -156,6 +166,111 @@ _RESPONSIBILITIES_RE = re.compile(
 )
 _CONCLUSIONS_RE = re.compile(r"\b(conclusiones|conclusion|cierre)\b")
 
+# ----------------------------------------------------------------------
+# Google: Gmail y Google Calendar (solo lectura)
+# ----------------------------------------------------------------------
+_MAIL_WORD = (
+    r"(?:correo|correos|mensaje|mensajes|email|emails|mail|mails|gmail|"
+    r"bandeja(?:\s+de\s+entrada)?|inbox)"
+)
+_CAL_WORD = (
+    r"(?:agenda|calendario|reunion|reuniones|evento|eventos|junta|juntas|"
+    r"cita|citas|calendar)"
+)
+_WEEKDAY_WORDS = (
+    "lunes",
+    "martes",
+    "miercoles",
+    "jueves",
+    "viernes",
+    "sabado",
+    "domingo",
+)
+
+_GOOGLE_STATUS_RE = re.compile(
+    r"\b(estado|estatus|situacion)\b[^?.!]{0,20}\b(google|gmail|calendar|calendario)\b"
+    r"|\b(google|gmail|calendar|calendario)\b[^?.!]{0,20}\b(conectado|desconectado|estado)\b"
+    r"|\b(conecta|conectar|desconecta|desconectar)\b[^?.!]{0,15}\b"
+    r"(google|gmail|calendar|calendario)\b"
+)
+
+_MAIL_COUNT_RE = re.compile(
+    rf"\b(cuant[oa]s?)\b[^?.!]{{0,40}}\b{_MAIL_WORD}\b"
+    rf"|\b{_MAIL_WORD}\b[^?.!]{{0,25}}\b(nuevos|sin leer|no leidos)\b"
+)
+
+_MAIL_LAST_RE = re.compile(
+    rf"\b(ultimo|ultima|mas reciente|reciente)\b[^?.!]{{0,25}}\b{_MAIL_WORD}\b"
+    rf"|\b{_MAIL_WORD}\b[^?.!]{{0,25}}\b(ultimo|ultima|mas reciente|reciente)\b"
+)
+
+_MAIL_READ_RE = re.compile(
+    rf"\b(lee|leer|leelo|leerlo|abre|abrir|abreme|muestra|muestrame|busca|"
+    rf"buscar|buscame|encuentra|encontrar)\b[^?.!]{{0,90}}\b{_MAIL_WORD}\b"
+)
+
+_MAIL_REVIEW_RE = re.compile(
+    rf"\b(revisa|revisar|consulta|consultar|mira|mirar|lista|listar|"
+    rf"muestra|muestrame|lee|leer)\b[^?.!]{{0,70}}\b{_MAIL_WORD}\b"
+    r"|\b(mis|los|todos los)\s+correos\b"
+    r"|\bbandeja de entrada\b"
+)
+
+_MAIL_FOLLOWUP_RE = re.compile(
+    r"\b(de quien (es|se trata)|quien (lo |la )?(envio|mando|escribio)|"
+    r"quien es el remitente|que dice( el| ese| este)? (correo|mensaje)|"
+    r"de que trata (el|ese|este) (correo|mensaje)|tiene adjuntos|"
+    r"esta leido|sin leer|importancia del correo|destinatario del correo)\b"
+    r"|\b(asunto|fecha|remitente|contenido|resumen|resumeme|resumelo|resume|"
+    r"adjuntos|importancia)\b"
+    rf"[^?.!]{{0,20}}\b{_MAIL_WORD}\b"
+    rf"|\b{_MAIL_WORD}\b[^?.!]{{0,25}}\b(asunto|fecha|remitente|contenido|"
+    rf"resumen|resumeme|resumelo|resume|adjuntos|importancia|dice|trata)\b"
+)
+
+_CAL_NEXT_RE = re.compile(
+    r"\b(proxima|proximo|siguiente)\b[^?.!]{0,25}\b(reunion|evento|cita|junta)\b"
+    r"|\b(reunion|evento|cita|junta)\b[^?.!]{0,20}\b(proxima|proximo|siguiente)\b"
+    r"|\ba que hora (es|sera)\b[^?.!]{0,25}\b(reunion|evento|cita|junta)\b"
+)
+
+_CAL_AGENDA_RE = re.compile(
+    r"\b(que tengo|que hay)\b"
+    r"(?![^?.!]{0,25}\b(abierto|cargado|documento|manual|informe|libro|"
+    r"excel|word|hoja|archivo)\b)"
+    r"|\b(que reuniones|que eventos|mis reuniones|mis eventos|mi agenda|"
+    r"mi calendario|tengo (algo|reuniones|eventos))\b"
+    r"|\b(proximas?|siguientes?)\s+(reuniones|eventos)\b"
+    r"|\b(cuales son|cual es)\b[^?.!]{0,20}\b(reuniones|eventos)\b"
+    rf"|\b(lee|leer|consulta|consultar|revisa|revisar|muestra|muestrame)\b"
+    rf"[^?.!]{{0,40}}\b{_CAL_WORD}\b"
+    rf"|\b{_CAL_WORD}\b[^?.!]{{0,30}}\b(hoy|manana|semana|proximos|"
+    r"lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b"
+)
+
+_CAL_FOLLOWUP_RE = re.compile(
+    r"\b(donde (es|sera|se realizara|se realiza|queda)|quien (organiza|convoca)|"
+    r"participantes|asistentes|invitados|a que hora (empieza|termina|es)|"
+    r"detalles (del|de la) (evento|reunion|cita)|primera (reunion|evento)|"
+    r"ultima (reunion|evento))\b"
+    rf"|\b(reunion|evento|cita|junta)\b[^?.!]{{0,25}}\b(donde|quien|hora|"
+    r"participantes|organiza|asistentes)\b"
+)
+
+_SUBJECT_QUERY_RE = re.compile(
+    r"\b(?:con\s+)?asunto\s+(?:de\s+|sobre\s+|llamado\s+|titulado\s+)?(.+)$"
+)
+_SENDER_QUERY_RE = re.compile(
+    r"\b(?:enviado\s+por|remitente|de|del)\s+(.+)$"
+)
+
+_MAIL_TAIL_RE = re.compile(
+    r"\s+(?:en|de)\s+(?:la\s+|mi\s+)?(?:bandeja(?:\s+de\s+entrada)?|inbox)\b.*$"
+    r"|\s+que\s+(?:me\s+)?(?:envio|mando|escribio|recibi)\b.*$"
+    r"|\s+y\s+(?:resumelo|resumela|resume|leelo|leela|dime)\b.*$"
+    r"|\s+por\s+favor\b.*$"
+)
+
 _EXTRACT_VERBS_RE = re.compile(
     r"\b(extrae|extraer|extraig|lista|listar|listame|enumera|enumerar|"
     r"muestra|muestrame|dime|que fechas|que acciones)\b"
@@ -175,6 +290,11 @@ _SHORT_COMMANDS: dict[str, str] = {
     "pendientes": EXTRACT_ACTIONS,
     "responsabilidades": EXTRACT_RESPONSIBILITIES,
     "conclusiones": EXTRACT_CONCLUSIONS,
+    "correos": MAIL_REVIEW,
+    "mis correos": MAIL_REVIEW,
+    "agenda": CALENDAR_AGENDA,
+    "mi agenda": CALENDAR_AGENDA,
+    "calendario": CALENDAR_AGENDA,
     "voz": MODE_VOICE,
     "microfono": MODE_VOICE,
     "texto": MODE_TEXT,
@@ -220,6 +340,9 @@ class Intent:
     detail: bool = False
     document_query: str | None = None
     file_kind: str = ""
+    query: str | None = None
+    mode: str = ""
+    period: str = ""
 
 
 def find_section_reference(normalized_text: str) -> str | None:
@@ -343,6 +466,58 @@ def _is_short_command(normalized_text: str, max_words: int = 7) -> bool:
     return len(normalized_text.split()) <= max_words
 
 
+def _clean_mail_query(value: str) -> str:
+    text = value or ""
+    text = _MAIL_TAIL_RE.sub("", text)
+    text = re.sub(r"^(?:el|la|los|las|un|una|mi|mis|tu|sus)\s+", "", text)
+    text = re.sub(
+        r"\b(?:que\s+se\s+llama|llamado|llamada|titulado|titulada)\b", " ", text
+    )
+    text = re.sub(r"[«»\"“”']", "", text)
+    text = re.sub(r"\s+", " ", text).strip(" ,.;:?!")
+    return text
+
+
+def extract_mail_query(normalized_text: str) -> tuple[str, str]:
+    """Devuelve el modo (asunto/remitente) y el texto buscado."""
+    text = re.sub(r"^(?:por favor[ ,]+)+", "", normalized_text)
+    subject = _SUBJECT_QUERY_RE.search(text)
+    if subject:
+        return "subject", _clean_mail_query(subject.group(1))
+    sender = _SENDER_QUERY_RE.search(text)
+    if sender:
+        query = _clean_mail_query(sender.group(1))
+        if query:
+            return "sender", query
+    rest = re.sub(
+        rf"^.*\b{_MAIL_WORD}\b\s*", "", text
+    )
+    return "", _clean_mail_query(rest)
+
+
+def extract_calendar_period(normalized_text: str) -> str:
+    """Traduce hoy/mañana/semana/día de la semana a un período interno."""
+    text = normalized_text
+    if "pasado manana" in text:
+        return "tomorrow"
+    for name in _WEEKDAY_WORDS:
+        if re.search(rf"\b(?:el|este|para el)\s+{name}\b", text) or re.search(
+            rf"\b{name}\b", text
+        ):
+            return f"weekday:{_WEEKDAY_WORDS.index(name)}"
+    if re.search(r"\b(proximos?\s+(siete|7)\s+dias|siguiente semana|proxima semana)\b", text):
+        return "next7"
+    if re.search(r"\b(esta semana|la semana|toda la semana)\b", text):
+        return "week"
+    if re.search(r"\bmanana\b", text):
+        return "tomorrow"
+    if re.search(r"\bhoy\b", text):
+        return "today"
+    if re.search(r"\b(proximas?|siguientes?)\s+(reuniones|eventos)\b", text):
+        return "next7"
+    return ""
+
+
 def parse(text: str) -> Intent:
     """Convierte una orden escrita o transcrita en una intención."""
     raw = normalize(text)
@@ -378,6 +553,53 @@ def parse(text: str) -> Intent:
 
     if _HELP_RE.search(normalized) and len(normalized.split()) <= 8:
         return Intent(HELP, text.strip())
+
+    # ------------------------------------------------------------------
+    # Google (solo lectura). Se evalúa antes de documentos y resúmenes.
+    # ------------------------------------------------------------------
+    if _GOOGLE_STATUS_RE.search(normalized):
+        if re.search(r"\b(desconecta|desconectar)\b", normalized):
+            mode = "disconnect"
+        elif re.search(r"\b(conecta|conectar)\b", normalized):
+            mode = "connect"
+        else:
+            mode = "status"
+        return Intent(GOOGLE_STATUS, text.strip(), mode=mode)
+
+    if _MAIL_COUNT_RE.search(normalized):
+        return Intent(MAIL_COUNT, text.strip())
+
+    if _MAIL_LAST_RE.search(normalized) and (
+        _MAIL_READ_RE.search(normalized)
+        or re.search(r"\b(lee|leer|leelo|muestra|muestrame|abre|dime|resume)\b", normalized)
+        or len(normalized.split()) <= 6
+    ):
+        return Intent(MAIL_READ, text.strip(), mode="last")
+
+    if _MAIL_FOLLOWUP_RE.search(normalized):
+        return Intent(MAIL_FOLLOWUP, text.strip())
+
+    if _MAIL_READ_RE.search(normalized):
+        mode, query = extract_mail_query(normalized)
+        return Intent(MAIL_READ, text.strip(), query=query or None, mode=mode or "any")
+
+    if _MAIL_REVIEW_RE.search(normalized):
+        return Intent(MAIL_REVIEW, text.strip())
+
+    if _CAL_NEXT_RE.search(normalized) and not re.search(
+        r"\b(proximas|siguientes)\s+(reuniones|eventos)\b", normalized
+    ):
+        return Intent(CALENDAR_NEXT, text.strip())
+
+    if _CAL_AGENDA_RE.search(normalized):
+        return Intent(
+            CALENDAR_AGENDA,
+            text.strip(),
+            period=extract_calendar_period(normalized) or "today",
+        )
+
+    if _CAL_FOLLOWUP_RE.search(normalized):
+        return Intent(CALENDAR_FOLLOWUP, text.strip())
 
     if _OPEN_DOC_RE.search(normalized):
         return Intent(
